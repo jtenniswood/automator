@@ -164,10 +164,34 @@ async def setup_services(hass: HomeAssistant):
                 # Store for frontend access
                 hass.data[DOMAIN]["latest_automation"] = single_automation_yaml
                 
-                # Save to file with proper formatting for the automations.yaml file
-                automations_path = os.path.join(hass.config.path(), "automations.yaml")
-                
                 try:
+                    # Use the Home Assistant automation API to create the automation
+                    # This makes it appear immediately in the UI without requiring a reload
+                    _LOGGER.info("Creating automation with ID %s via API", automation_id)
+                    
+                    # First, check if the automation entity registry is available
+                    from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
+                    from homeassistant.components.automation import DOMAIN as AUTOMATION_DOMAIN
+                    
+                    # Create the automation using the automation.create service
+                    service_data = {
+                        "id": automation_id,
+                        **automation_data  # Include all the generated automation data
+                    }
+                    
+                    await hass.services.async_call(
+                        AUTOMATION_DOMAIN,
+                        "create",
+                        service_data,
+                        blocking=True
+                    )
+                    
+                    _LOGGER.info("Automation created successfully via API")
+                    
+                    # Also save to the automations.yaml file for persistence
+                    # This is optional but ensures the automation persists across restarts
+                    automations_path = os.path.join(hass.config.path(), "automations.yaml")
+                    
                     # Check if file exists and has content
                     if os.path.exists(automations_path) and os.path.getsize(automations_path) > 0:
                         # Read existing automations
@@ -208,15 +232,74 @@ async def setup_services(hass: HomeAssistant):
                             indented_automation = '\n'.join(formatted_lines)
                             f.write(indented_automation)
                     
-                    _LOGGER.info("Automation with ID %s saved to %s", automation_id, automations_path)
+                    _LOGGER.info("Automation also saved to %s", automations_path)
+                    
                 except Exception as e:
-                    _LOGGER.error("Error saving automation to file: %s", str(e))
-                    create_notification(
-                        hass,
-                        f"Error saving to automations.yaml: {str(e)}",
-                        title="AI Automation Creator Error",
-                        notification_id="ai_automation_creator_file_error",
-                    )
+                    _LOGGER.error("Error creating automation via API, falling back to file creation: %s", str(e))
+                    
+                    # If API creation fails, fall back to file-based creation and trigger a reload
+                    try:
+                        # Save to file with proper formatting for the automations.yaml file
+                        automations_path = os.path.join(hass.config.path(), "automations.yaml")
+                        
+                        # Check if file exists and has content
+                        if os.path.exists(automations_path) and os.path.getsize(automations_path) > 0:
+                            # Read existing automations
+                            with open(automations_path, "r") as f:
+                                content = f.read().strip()
+                                
+                            # Prepare the properly indented automation entry
+                            # First line starts with '- ' and the rest is indented by 2 spaces
+                            indent_level = 2
+                            lines = single_automation_yaml.strip().split('\n')
+                            
+                            # Format the first line with a dash
+                            formatted_lines = [f"- {lines[0]}"]
+                            
+                            # Format the rest of the lines with proper indentation
+                            for line in lines[1:]:
+                                formatted_lines.append(' ' * indent_level + line)
+                            
+                            indented_automation = '\n'.join(formatted_lines)
+                            
+                            # Append to file
+                            with open(automations_path, "a") as f:
+                                f.write("\n\n# AI Generated Automation\n")
+                                f.write(indented_automation)
+                        else:
+                            # Create new automations file with header and first automation
+                            with open(automations_path, "w") as f:
+                                f.write("# Automations created by AI Automation Creator\n\n")
+                                
+                                # Format with leading dash
+                                lines = single_automation_yaml.strip().split('\n')
+                                formatted_lines = [f"- {lines[0]}"]
+                                
+                                # Indent the rest by 2 spaces
+                                for line in lines[1:]:
+                                    formatted_lines.append('  ' + line)
+                                
+                                indented_automation = '\n'.join(formatted_lines)
+                                f.write(indented_automation)
+                        
+                        _LOGGER.info("Automation saved to %s, triggering reload", automations_path)
+                        
+                        # Trigger an automation reload
+                        await hass.services.async_call(
+                            AUTOMATION_DOMAIN,
+                            "reload",
+                            {},
+                            blocking=True
+                        )
+                        
+                    except Exception as file_error:
+                        _LOGGER.error("Error saving automation to file: %s", str(file_error))
+                        create_notification(
+                            hass,
+                            f"Error saving to automations.yaml: {str(file_error)}",
+                            title="AI Automation Creator Error",
+                            notification_id="ai_automation_creator_file_error",
+                        )
                 
                 create_notification(
                     hass,
