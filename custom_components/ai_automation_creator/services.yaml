@@ -6,7 +6,7 @@ create_automation:
       name: Description
       description: Natural language description of the automation
       required: true
-      example: "Turn on the living room lights when motion is detected in the hallway after sunset"
+      example: "Turn on living room lights when motion is detected in the hallway after sunset"
       selector:
         text:
           multiline: true

@@ -3,13 +3,10 @@
   "name": "AI Automation Creator",
   "codeowners": ["@jtenniswood"],
   "config_flow": true,
-  "dependencies": ["frontend", "http"],
+  "dependencies": [],
   "documentation": "https://github.com/jtenniswood/ai-automation-creator",
-  "homekit": {},
   "integration_type": "service",
   "iot_class": "cloud_polling",
-  "iot_standards": [],
-  "issue_tracker": "https://github.com/yourusername/ai-automation-creator/issues",
   "requirements": ["openai>=1.0.0", "pyyaml>=6.0"],
   "version": "1.0.0"
 } 
