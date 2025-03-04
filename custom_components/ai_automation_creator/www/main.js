@@ -3,6 +3,9 @@
  * Custom panel for creating Home Assistant automations with natural language
  */
 
+// This ensures the Home Assistant connection is properly established
+const hassConnection = document.querySelector('home-assistant');
+
 class AiAutomationCreator extends HTMLElement {
   constructor() {
     super();
@@ -12,6 +15,26 @@ class AiAutomationCreator extends HTMLElement {
     this.automationYaml = "";
     this.automationCreated = false;
     this.errorMessage = null;
+    this._hass = null;
+    
+    // Try to get Home Assistant connection
+    if (hassConnection) {
+      hassConnection.addEventListener('hass-connect', (ev) => {
+        this._hass = ev.detail.hass;
+        this.render();
+      });
+    }
+    
+    // For standalone loading
+    window.addEventListener('connection-status', (ev) => {
+      if (ev.detail === 'connected') {
+        // Get Home Assistant object from parent
+        if (window.parent.document.querySelector('home-assistant')) {
+          this._hass = window.parent.document.querySelector('home-assistant').hass;
+          this.render();
+        }
+      }
+    });
   }
 
   setConfig(config) {
@@ -31,7 +54,19 @@ class AiAutomationCreator extends HTMLElement {
   
   render() {
     if (!this._hass) {
-      this.shadowRoot.innerHTML = `<div>Loading...</div>`;
+      this.shadowRoot.innerHTML = `
+        <style>
+          :host {
+            display: block;
+            font-family: var(--paper-font-body1_-_font-family);
+            padding: 16px;
+          }
+        </style>
+        <div>
+          <h2>Loading Home Assistant connection...</h2>
+          <p>If this message persists, please refresh the page.</p>
+        </div>
+      `;
       return;
     }
     
@@ -179,6 +214,20 @@ class AiAutomationCreator extends HTMLElement {
       if (resetButton) {
         resetButton.addEventListener('click', () => this.reset());
       }
+      
+      // Add copy button functionality
+      const copyButton = this.shadowRoot.querySelector('#copy-yaml');
+      if (copyButton) {
+        copyButton.addEventListener('click', () => {
+          const yamlText = this.shadowRoot.querySelector('#yaml-output').textContent;
+          navigator.clipboard.writeText(yamlText).then(() => {
+            copyButton.textContent = "Copied!";
+            setTimeout(() => {
+              copyButton.textContent = "Copy YAML";
+            }, 2000);
+          });
+        });
+      }
     }
   }
   
@@ -243,7 +292,7 @@ class AiAutomationCreator extends HTMLElement {
       return new Promise(resolve => {
         setTimeout(() => {
           resolve();
-        }, 1500); // Longer wait to ensure processing completes
+        }, 2000); // Longer wait to ensure processing completes
       });
     })
     .then(() => {
@@ -257,23 +306,6 @@ class AiAutomationCreator extends HTMLElement {
         this.isProcessing = false;
         this.automationCreated = true;
         this.render();
-        
-        // Add copy functionality
-        setTimeout(() => {
-          const copyButton = this.shadowRoot.querySelector('#copy-yaml');
-          if (copyButton) {
-            copyButton.addEventListener('click', () => {
-              const yamlText = this.shadowRoot.querySelector('#yaml-output').textContent;
-              navigator.clipboard.writeText(yamlText).then(() => {
-                copyButton.textContent = "Copied!";
-                setTimeout(() => {
-                  copyButton.textContent = "Copy YAML";
-                }, 2000);
-              });
-            });
-          }
-        }, 100);
-        
         return;
       }
       
@@ -281,52 +313,38 @@ class AiAutomationCreator extends HTMLElement {
       return new Promise(resolve => {
         setTimeout(() => {
           try {
-            // Look for the latest automation in hass data
-            if (this._hass.data && 
-                this._hass.data.ai_automation_creator && 
-                this._hass.data.ai_automation_creator.latest_automation) {
-              this.automationYaml = this._hass.data.ai_automation_creator.latest_automation;
-            } else {
-              // Check for success notification
-              const notifications = this._hass.states;
-              let automationCreated = false;
-              
-              Object.keys(notifications).forEach(key => {
-                if (key.includes('persistent_notification.ai_automation_creator_success')) {
-                  automationCreated = true;
+            // Check for success notification to confirm
+            const notifications = this._hass.states;
+            let automationCreated = false;
+            
+            Object.keys(notifications).forEach(key => {
+              if (key.includes('persistent_notification.ai_automation_creator_success')) {
+                automationCreated = true;
+              }
+            });
+            
+            // Try to get the automation from the get_automation_yaml service again
+            this._hass.callService("ai_automation_creator", "get_automation_yaml", {})
+              .then(result => {
+                if (result && result.yaml) {
+                  this.automationYaml = result.yaml;
+                } else if (automationCreated) {
+                  // If we can confirm it was created but don't have the YAML, show a message
+                  this.automationYaml = "Automation was created successfully and added to your automations.yaml file.";
+                } else {
+                  // Fallback message if we can't find confirmation or YAML
+                  this.automationYaml = "Automation has been processed. Please check your automations.yaml file.";
                 }
+                
+                this.isProcessing = false;
+                this.automationCreated = true;
+                this.render();
+                resolve();
+              })
+              .catch(error => {
+                this.handleError(error);
+                resolve();
               });
-              
-              // If we can confirm it was created but don't have the YAML, show a message
-              if (automationCreated) {
-                this.automationYaml = "Automation was created successfully and added to your automations.yaml file.";
-              } else {
-                // Fallback message if we can't find confirmation or YAML
-                this.automationYaml = "Automation has been processed. Please check your automations.yaml file.";
-              }
-            }
-            
-            this.isProcessing = false;
-            this.automationCreated = true;
-            this.render();
-            
-            // Add copy functionality
-            setTimeout(() => {
-              const copyButton = this.shadowRoot.querySelector('#copy-yaml');
-              if (copyButton) {
-                copyButton.addEventListener('click', () => {
-                  const yamlText = this.shadowRoot.querySelector('#yaml-output').textContent;
-                  navigator.clipboard.writeText(yamlText).then(() => {
-                    copyButton.textContent = "Copied!";
-                    setTimeout(() => {
-                      copyButton.textContent = "Copy YAML";
-                    }, 2000);
-                  });
-                });
-              }
-            }, 100);
-            
-            resolve();
           } catch (error) {
             this.handleError(error);
             resolve();

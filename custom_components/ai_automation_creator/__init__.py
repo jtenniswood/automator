@@ -270,9 +270,9 @@ async def async_setup_services(hass: HomeAssistant):
     async def get_automation_yaml(call):
         """Get the last created automation YAML."""
         yaml_content = hass.data[DOMAIN].get("latest_automation", "")
-        _LOGGER.debug("Returning YAML content: %s", yaml_content)
+        _LOGGER.debug("Returning YAML content of length: %d", len(yaml_content) if yaml_content else 0)
         
-        # Ensure we're returning a valid response that can be accessed by the frontend
+        # Ensure we're returning a valid response that the frontend can access
         return {"yaml": yaml_content}
     
     # Register services
