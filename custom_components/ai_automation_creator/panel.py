@@ -4,7 +4,6 @@ import logging
 import os
 from pathlib import Path
 
-from homeassistant.components import panel_custom
 from homeassistant.components.frontend import async_register_built_in_panel
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
@@ -34,9 +33,9 @@ async def async_setup_panel(hass: HomeAssistant):
     sidebar_icon = config.get("sidebar_icon", "mdi:robot")
     
     root_path = Path(__file__).parent
+    www_path = root_path / "www"
     
     # Make sure the www directory exists
-    www_path = root_path / "www"
     if not os.path.exists(www_path):
         _LOGGER.warning("www directory doesn't exist, creating it")
         os.makedirs(www_path, exist_ok=True)
@@ -46,6 +45,8 @@ async def async_setup_panel(hass: HomeAssistant):
     if not os.path.exists(js_path):
         _LOGGER.error("main.js doesn't exist at %s", js_path)
         return False
+    
+    _LOGGER.info("Setting up AI Automation Creator panel with script at %s", FRONTEND_SCRIPT_URL)
     
     try:
         # Register the panel
@@ -60,7 +61,8 @@ async def async_setup_panel(hass: HomeAssistant):
                     "name": "ai-automation-creator",
                     "module_url": FRONTEND_SCRIPT_URL,
                     "embed_iframe": False,
-                    "trust_external": False,
+                    "trust_external": True,
+                    "allow_all_scripts": True
                 }
             },
             require_admin=True,

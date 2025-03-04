@@ -29,18 +29,34 @@ async def async_register_frontend(hass: HomeAssistant):
         hass.components.persistent_notification.create(
             "The AI Automation Creator frontend file is missing. Please reinstall the integration.",
             title="AI Automation Creator Error",
-            notification_id="ai_automation_creator_error",
+            notification_id="ai_automation_creator_frontend_error",
         )
         return False
     
     # Register the frontend script
     try:
+        # Unregister first if already registered to force reload
+        try:
+            hass.http.app.router.routes.freeze = False
+            for route in list(hass.http.app.router.routes()):
+                if route.resource and str(route.resource) == FRONTEND_SCRIPT_URL:
+                    _LOGGER.debug("Removing existing route for %s", FRONTEND_SCRIPT_URL)
+                    hass.http.app.router.routes.remove(route)
+            hass.http.app.router.routes.freeze = True
+        except Exception as ex:
+            _LOGGER.debug("Could not unregister existing route: %s", ex)
+        
         hass.http.register_static_path(
             FRONTEND_SCRIPT_URL, str(js_path), cache_headers=False
         )
         _LOGGER.info("Registered static path: %s -> %s", FRONTEND_SCRIPT_URL, js_path)
         
         # Add the script to frontend
+        current_urls = hass.data.get("frontend_extra_js_url_es5", set())
+        
+        if FRONTEND_SCRIPT_URL in current_urls:
+            current_urls.remove(FRONTEND_SCRIPT_URL)
+            
         add_extra_js_url(hass, FRONTEND_SCRIPT_URL)
         _LOGGER.info("Added JS URL: %s", FRONTEND_SCRIPT_URL)
         

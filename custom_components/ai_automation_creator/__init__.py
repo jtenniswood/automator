@@ -86,6 +86,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     @callback
     def update_frontend_data(yaml_content):
         """Update the frontend data with the latest automation YAML."""
+        _LOGGER.debug("Updating frontend data with latest automation YAML")
         hass.data[DOMAIN]["latest_automation"] = yaml_content
     
     async def create_automation(call: ServiceCall) -> None:
@@ -118,6 +119,7 @@ Consider appropriate triggers, conditions, and actions.
 Please provide the automation configuration in YAML format. The YAML should be valid and immediately usable in Home Assistant."""
 
         try:
+            _LOGGER.info("Calling OpenAI API to generate automation")
             response = await hass.async_add_executor_job(
                 lambda: openai.chat.completions.create(
                     model=hass.data[DOMAIN].get(CONF_MODEL, DEFAULT_MODEL),
@@ -137,7 +139,9 @@ Please provide the automation configuration in YAML format. The YAML should be v
             elif "```" in automation_yaml:
                 automation_yaml = automation_yaml.split("```")[1].split("```")[0].strip()
             
-            # Store for frontend
+            _LOGGER.info("Successfully generated automation YAML")
+            
+            # Store for frontend - do this immediately to ensure the data is available
             update_frontend_data(automation_yaml)
             
             # Save the automation to a file
@@ -156,6 +160,8 @@ Please provide the automation configuration in YAML format. The YAML should be v
                     title="Automation Created",
                     notification_id="ai_automation_creator_success",
                 )
+                
+                _LOGGER.info("Automation saved to file and reloaded")
                 
             except Exception as file_err:
                 _LOGGER.error("Error saving automation: %s", file_err)
@@ -178,10 +184,12 @@ Please provide the automation configuration in YAML format. The YAML should be v
             )
             raise
 
-    # Expose automation YAML to frontend
+    # Expose automation YAML to frontend via a service
     async def get_automation_yaml(call):
         """Get the last created automation YAML."""
-        return {"yaml": hass.data[DOMAIN].get("latest_automation", "")}
+        yaml_content = hass.data[DOMAIN].get("latest_automation", "")
+        _LOGGER.debug("Returning latest automation YAML: %s", yaml_content[:100] + "..." if yaml_content else "None")
+        return {"yaml": yaml_content}
     
     # Register services
     hass.services.async_register(
