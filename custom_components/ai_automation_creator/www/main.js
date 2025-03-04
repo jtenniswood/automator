@@ -115,6 +115,17 @@ class AiAutomationCreator extends HTMLElement {
           margin: 0;
           white-space: pre-wrap;
           font-family: monospace;
+          overflow-x: auto;
+          color: var(--primary-text-color);
+          line-height: 1.4;
+          /* Ensure YAML formatting is preserved */
+          tab-size: 2;
+        }
+        #yaml-output {
+          max-height: 400px;
+          overflow-y: auto;
+          padding: 8px 0;
+          border-radius: 4px;
         }
         .button-container {
           display: flex;

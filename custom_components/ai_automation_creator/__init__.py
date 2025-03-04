@@ -14,7 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.typing import ConfigType
-from homeassistant.helpers.persistent_notification import create_notification
+from homeassistant.components.persistent_notification import create as create_notification
 
 from .const import CONF_OPENAI_API_KEY, DOMAIN, CONF_MODEL, DEFAULT_MODEL
 from .services import async_setup_services

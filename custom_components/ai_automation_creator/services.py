@@ -5,7 +5,7 @@ import yaml
 import openai
 
 from homeassistant.core import HomeAssistant, ServiceCall, callback
-from homeassistant.helpers.persistent_notification import create_notification
+from homeassistant.components.persistent_notification import create as create_notification
 
 from .const import DOMAIN, CONF_OPENAI_API_KEY, DEFAULT_MODEL
 
