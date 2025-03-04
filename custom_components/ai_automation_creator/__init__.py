@@ -4,6 +4,8 @@ import os
 import yaml
 import voluptuous as vol
 import openai
+import asyncio
+import concurrent.futures
 
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.config_entries import ConfigEntry
@@ -100,7 +102,6 @@ async def setup_services(hass: HomeAssistant):
             
             try:
                 # Make the OpenAI API call in the simplest way possible
-                from homeassistant.helpers.executor import async_call_executor
                 import functools
                 
                 def call_openai():
@@ -113,7 +114,11 @@ async def setup_services(hass: HomeAssistant):
                         temperature=0.2,
                     )
                 
-                response = await async_call_executor(functools.partial(call_openai))
+                # Use concurrent.futures to run the OpenAI call in a thread pool
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    response = await asyncio.get_event_loop().run_in_executor(
+                        executor, call_openai
+                    )
                 
                 automation_yaml = response.choices[0].message.content.strip()
                 automation_yaml = automation_yaml.replace("```yaml", "").replace("```", "").strip()
