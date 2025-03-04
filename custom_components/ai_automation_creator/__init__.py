@@ -9,7 +9,6 @@ import concurrent.futures
 import re
 import datetime
 import time
-import copy
 
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.config_entries import ConfigEntry
@@ -98,61 +97,32 @@ async def setup_services(hass: HomeAssistant):
         try:
             _LOGGER.info("Creating automation from description: %s", description)
             
-            # System prompt
+            # Simple system prompt
             system_prompt = """
             You are a Home Assistant automation expert. Create a valid Home Assistant automation based on this description.
             
             IMPORTANT REQUIREMENTS:
             1. Return ONLY the YAML for the automation, no explanations or markdown.
             2. Do NOT include an 'id' field - I will add this automatically.
-            3. Use the following structure for your automation:
-               - Each trigger MUST have an ID that describes what it is (e.g., "motion_detected", "time_based_trigger")
-               - Use "triggers" (plural) instead of "trigger" for all automations, even with a single trigger
-               - Use "actions" (plural) instead of "action"
-               - Structure the automation with a 'choose' element in the actions section
-               - Within 'choose', use trigger-based conditions to check which trigger fired
-               - Place the actual action sequence within the appropriate 'choose' condition
+            3. Include appropriate triggers, conditions, and actions based on the request.
+            4. Use proper yaml formatting with correct indentation.
+            5. Include an 'alias' that is human-readable.
+            6. Include a descriptive 'description' field explaining what the automation does.
             
-            4. Include an 'alias' that is human-readable.
-            5. Include a descriptive 'description' field explaining what the automation does.
-            
-            Example format (do not include the automation id):
+            Example format (do not include the id):
             ```
-            alias: Turn on lights when motion detected
-            description: Turns on the living room lights when motion is detected or at sunset
-            triggers:
-              - id: motion_detected
-                platform: state
-                entity_id: binary_sensor.living_room_motion
-                to: 'on'
-              - id: sunset_trigger
-                platform: sun
+            alias: Turn on lights at sunset
+            description: Turns on the living room lights automatically when the sun sets
+            trigger:
+              - platform: sun
                 event: sunset
-            conditions: []
-            actions:
-              - choose:
-                - conditions:
-                    - condition: trigger
-                      id: motion_detected
-                  sequence:
-                    - service: light.turn_on
-                      target:
-                        entity_id: light.living_room
-                      data:
-                        brightness_pct: 100
-                - conditions:
-                    - condition: trigger
-                      id: sunset_trigger
-                  sequence:
-                    - service: light.turn_on
-                      target:
-                        entity_id: light.living_room
-                      data:
-                        brightness_pct: 50
+            condition: []
+            action:
+              - service: light.turn_on
+                target:
+                  entity_id: light.living_room
             mode: single
             ```
-            
-            Even for simple automations with a single trigger, use this structure for consistency.
             """
             
             try:
@@ -178,9 +148,6 @@ async def setup_services(hass: HomeAssistant):
                 
                 # Check if it's valid YAML
                 automation_data = yaml.safe_load(automation_yaml)
-                
-                # Ensure the automation has the correct structure
-                automation_data = ensure_automation_structure(automation_data, _LOGGER)
                 
                 # Generate a 13-digit numerical ID
                 automation_id = str(int(time.time() * 1000))  # Current time in milliseconds as a 13-digit number
@@ -383,96 +350,3 @@ async def setup_services(hass: HomeAssistant):
     
     _LOGGER.info("AI Automation Creator services registered")
     return True 
-
-def ensure_automation_structure(automation_data, logger):
-    """
-    Ensure the automation has the required structure with trigger IDs and choose elements.
-    If not, transform it to match the required structure.
-    """
-    modified_data = copy.deepcopy(automation_data)
-    
-    # Check if we need to rename 'trigger' to 'triggers'
-    if 'trigger' in modified_data and 'triggers' not in modified_data:
-        logger.info("Converting 'trigger' to 'triggers'")
-        modified_data['triggers'] = modified_data.pop('trigger')
-    
-    # Check if we need to rename 'action' to 'actions'
-    if 'action' in modified_data and 'actions' not in modified_data:
-        logger.info("Converting 'action' to 'actions'")
-        modified_data['actions'] = modified_data.pop('action')
-    
-    # Ensure triggers have IDs
-    if 'triggers' in modified_data and isinstance(modified_data['triggers'], list):
-        for i, trigger in enumerate(modified_data['triggers']):
-            if 'id' not in trigger:
-                # Generate a default ID based on the platform or type
-                platform = trigger.get('platform', '')
-                trigger_type = trigger.get('type', '')
-                entity_id = trigger.get('entity_id', '')
-                
-                # Try to create a meaningful ID
-                if entity_id:
-                    # Extract the entity name from entity_id
-                    entity_name = entity_id.split('.')[-1] if '.' in entity_id else entity_id
-                    default_id = f"{platform or trigger_type}_{entity_name}".lower()
-                else:
-                    default_id = f"{platform or trigger_type}_{i+1}".lower()
-                
-                # Clean the ID
-                default_id = re.sub(r'[^a-z0-9_]', '_', default_id)
-                default_id = re.sub(r'_+', '_', default_id)  # Replace multiple underscores
-                
-                logger.info(f"Adding ID '{default_id}' to trigger #{i+1}")
-                trigger['id'] = default_id
-    
-    # If we don't have a 'choose' structure in actions, create it
-    if 'actions' in modified_data and isinstance(modified_data['actions'], list):
-        has_choose = False
-        
-        # Check if any action is already a 'choose' element
-        for action in modified_data['actions']:
-            if isinstance(action, dict) and 'choose' in action:
-                has_choose = True
-                break
-        
-        if not has_choose:
-            logger.info("Restructuring actions to use 'choose' pattern")
-            original_actions = modified_data['actions']
-            
-            # Create new actions with choose structure
-            new_actions = []
-            
-            # Get trigger IDs
-            trigger_ids = []
-            if 'triggers' in modified_data and isinstance(modified_data['triggers'], list):
-                for trigger in modified_data['triggers']:
-                    if 'id' in trigger:
-                        trigger_ids.append(trigger['id'])
-            
-            if trigger_ids:
-                # Create a 'choose' action that uses the trigger IDs
-                choose_action = {
-                    'choose': []
-                }
-                
-                # Add a condition and sequence for each trigger
-                for trigger_id in trigger_ids:
-                    condition_block = {
-                        'conditions': [
-                            {
-                                'condition': 'trigger',
-                                'id': trigger_id
-                            }
-                        ],
-                        'sequence': original_actions
-                    }
-                    choose_action['choose'].append(condition_block)
-                
-                new_actions.append(choose_action)
-                modified_data['actions'] = new_actions
-            else:
-                # If no trigger IDs, keep original actions but note the issue
-                logger.warning("Cannot create 'choose' structure: no trigger IDs found")
-    
-    # Return the modified automation data
-    return modified_data 
