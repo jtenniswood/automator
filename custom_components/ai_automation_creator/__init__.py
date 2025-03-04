@@ -1,23 +1,18 @@
 """The AI Automation Creator integration."""
-from __future__ import annotations
-
-import json
-import logging
 import os
-from typing import Any
+import logging
 from pathlib import Path
 
-import openai
 import voluptuous as vol
+import openai
 
+from homeassistant.core import HomeAssistant, callback, ServiceCall
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall, callback
-from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.helpers import config_validation as cv
 from homeassistant.components.persistent_notification import create as create_notification
 
-from .const import CONF_OPENAI_API_KEY, DOMAIN, CONF_MODEL, DEFAULT_MODEL
-from .services import async_setup_services
+from .const import DOMAIN, CONF_OPENAI_API_KEY, CONF_MODEL, DEFAULT_MODEL
 from .panel import async_setup_panel
 from .frontend import async_register_frontend
 
@@ -32,12 +27,6 @@ CONFIG_SCHEMA = vol.Schema(
         )
     },
     extra=vol.ALLOW_EXTRA,
-)
-
-SERVICE_CREATE_AUTOMATION_SCHEMA = vol.Schema(
-    {
-        vol.Required("description"): cv.string,
-    }
 )
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -58,7 +47,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     conf = config[DOMAIN]
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN] = {
-        "config": conf
+        "config": conf,
+        "latest_automation": None
     }
     
     # Set up services
@@ -103,8 +93,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN].update({
-        "config_entry": entry.data
+        "config_entry": entry.data,
+        "latest_automation": None
     })
+    
+    # Set OpenAI API key
+    if CONF_OPENAI_API_KEY in entry.data:
+        openai.api_key = entry.data[CONF_OPENAI_API_KEY]
     
     # Make sure services are set up
     await async_setup_services(hass)
@@ -125,126 +120,171 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     return True
 
-@callback
-def update_frontend_data(hass: HomeAssistant, yaml_content):
-    """Update the frontend data with the latest automation YAML."""
-    _LOGGER.debug("Updating frontend data with latest automation YAML")
-    hass.data[DOMAIN]["latest_automation"] = yaml_content
-
-async def create_automation(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Create an automation based on natural language description."""
-    description = call.data.get("description")
-    if not description:
-        raise ValueError("Description is required")
-
-    # Get all available entities
-    entity_registry = er.async_get(hass)
-    entities = [
-        {
-            "entity_id": entity.entity_id,
-            "name": entity.name or entity.entity_id,
-            "domain": entity.domain,
-            "device_class": entity.device_class,
-        }
-        for entity in entity_registry.entities.values()
-    ]
-
-    # Create prompt for OpenAI
-    prompt = f"""Create a Home Assistant automation based on this description: {description}
-
-Available entities:
-{json.dumps(entities, indent=2)}
-
-Analyze the request and available entities to create a robust automation. Use Home Assistant's automation YAML format.
-Consider appropriate triggers, conditions, and actions.
-
-Please provide the automation configuration in YAML format. The YAML should be valid and immediately usable in Home Assistant."""
-
-    try:
-        _LOGGER.info("Calling OpenAI API to generate automation")
-        response = await hass.async_add_executor_job(
-            lambda: openai.chat.completions.create(
-                model=hass.data[DOMAIN].get(CONF_MODEL, DEFAULT_MODEL),
-                messages=[
-                    {"role": "system", "content": "You are a Home Assistant automation expert. Create valid YAML configurations for automations."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-            )
-        )
-
-        automation_yaml = response.choices[0].message.content
-        
-        # Clean up the YAML (remove markdown formatting if present)
-        if "```yaml" in automation_yaml:
-            automation_yaml = automation_yaml.split("```yaml")[1].split("```")[0].strip()
-        elif "```" in automation_yaml:
-            automation_yaml = automation_yaml.split("```")[1].split("```")[0].strip()
-        
-        _LOGGER.info("Successfully generated automation YAML")
-        
-        # Store for frontend - do this immediately to ensure the data is available
-        update_frontend_data(hass, automation_yaml)
-        
-        # Save the automation to a file
-        automation_path = f"{hass.config.config_dir}/automations.yaml"
-        try:
-            with open(automation_path, "a") as f:
-                f.write(f"\n{automation_yaml}\n")
-            
-            # Reload automations
-            await hass.services.async_call("automation", "reload")
-            
-            # Create a notification
-            create_notification(
-                hass,
-                f"Successfully created automation from your description: \"{description[:50]}...\"",
-                title="Automation Created",
-                notification_id="ai_automation_creator_success",
-            )
-            
-            _LOGGER.info("Automation saved to file and reloaded")
-            
-        except Exception as file_err:
-            _LOGGER.error("Error saving automation: %s", file_err)
-            create_notification(
-                hass,
-                f"Generated automation but failed to save it: {str(file_err)}",
-                title="Automation Error",
-                notification_id="ai_automation_creator_file_error",
-            )
-        
-        return {"success": True, "automation": automation_yaml}
-
-    except Exception as err:
-        _LOGGER.error("Error creating automation: %s", err)
-        create_notification(
-            hass,
-            f"Failed to create automation: {str(err)}",
-            title="Automation Error",
-            notification_id="ai_automation_creator_error",
-        )
-        raise
-
-# Expose automation YAML to frontend via a service
-async def get_automation_yaml(hass: HomeAssistant, call):
-    """Get the last created automation YAML."""
-    yaml_content = hass.data[DOMAIN].get("latest_automation", "")
-    _LOGGER.debug("Returning latest automation YAML: %s", yaml_content[:100] + "..." if yaml_content else "None")
-    return {"yaml": yaml_content}
-
 # Register services
 async def async_setup_services(hass: HomeAssistant):
+    """Set up services for AI Automation Creator."""
+    
+    # Initialize data structure if not already done
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN].setdefault("latest_automation", None)
+    
+    @callback
+    def update_frontend_data(yaml_content):
+        """Update the frontend data with the latest automation YAML."""
+        _LOGGER.debug("Updating frontend data with latest automation YAML")
+        if yaml_content and yaml_content.strip():
+            # Store the YAML content for retrieval by the frontend
+            hass.data[DOMAIN]["latest_automation"] = yaml_content.strip()
+            _LOGGER.info("Stored %d characters of YAML for frontend access", len(yaml_content))
+        else:
+            _LOGGER.warning("Attempted to store empty YAML content")
+    
+    async def create_automation(call: ServiceCall) -> None:
+        """Create an automation based on natural language description."""
+        description = call.data.get("description")
+        if not description:
+            _LOGGER.error("No description provided for automation creation")
+            return
+        
+        if not openai.api_key:
+            _LOGGER.error("OpenAI API key not configured")
+            create_notification(
+                hass,
+                "OpenAI API key not configured. Please set up the integration properly.",
+                title="AI Automation Creator Error",
+                notification_id="ai_automation_creator_api_error",
+            )
+            return
+        
+        try:
+            _LOGGER.info("Creating automation from description: %s", description)
+            
+            # Create automation YAML using OpenAI
+            try:
+                # Create a system prompt that guides the model to generate valid YAML directly
+                system_prompt = """
+                You are an expert Home Assistant automation creator. 
+                Your task is to create a valid automation for Home Assistant based on the user's description.
+                
+                IMPORTANT: DO NOT ASK ANY QUESTIONS. Generate the best possible automation with the information provided.
+                
+                Return ONLY the YAML for the automation, without any markdown formatting, explanations, or code blocks.
+                Do not include any questions, suggestions, or comments - ONLY the YAML content.
+                
+                The YAML should be valid and ready to be copied directly into an automations.yaml file.
+                
+                Format your response as a single automation with the following structure:
+                - id: unique_id_for_automation
+                  alias: Descriptive Name
+                  description: Optional longer description
+                  trigger:
+                    # trigger configuration
+                  condition:
+                    # condition configuration (if needed)
+                  action:
+                    # action configuration
+                """
+                
+                response = openai.chat.completions.create(
+                    model=DEFAULT_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Create a Home Assistant automation for: {description}"}
+                    ],
+                    temperature=0.2,
+                )
+                
+                automation_yaml = response.choices[0].message.content.strip()
+                
+                # Clean up the response to ensure it's pure YAML
+                automation_yaml = automation_yaml.replace("```yaml", "").replace("```", "").strip()
+                
+                # Validate the YAML
+                import yaml
+                yaml.safe_load(automation_yaml)
+                
+            except Exception as e:
+                _LOGGER.error("Error generating YAML: %s", str(e))
+                create_notification(
+                    hass,
+                    f"Error generating automation YAML: {str(e)}",
+                    title="AI Automation Creator Error",
+                    notification_id="ai_automation_creator_generation_error",
+                )
+                return
+            
+            if not automation_yaml:
+                _LOGGER.error("Failed to generate automation YAML")
+                create_notification(
+                    hass,
+                    "Failed to generate automation YAML. Please try a different description.",
+                    title="AI Automation Creator Error",
+                    notification_id="ai_automation_creator_generation_error",
+                )
+                return
+            
+            # Store for frontend access
+            update_frontend_data(automation_yaml)
+            
+            # Save the automation to automations.yaml
+            try:
+                automations_path = os.path.join(hass.config.path(), "automations.yaml")
+                
+                # Create the file if it doesn't exist
+                if not os.path.exists(automations_path):
+                    with open(automations_path, "w") as f:
+                        f.write("# Automations created by AI Automation Creator\n\n")
+                
+                # Append the new automation
+                with open(automations_path, "a") as f:
+                    f.write("\n# AI Generated Automation\n")
+                    f.write(automation_yaml)
+                    f.write("\n")
+                
+                _LOGGER.info("Automation saved to %s", automations_path)
+                
+                create_notification(
+                    hass,
+                    f"Successfully created automation from: {description}",
+                    title="AI Automation Creator Success",
+                    notification_id="ai_automation_creator_success",
+                )
+            except Exception as e:
+                _LOGGER.error("Error saving automation to file: %s", str(e))
+                create_notification(
+                    hass,
+                    f"Error saving automation to file: {str(e)}",
+                    title="AI Automation Creator Error",
+                    notification_id="ai_automation_creator_file_error",
+                )
+                
+        except Exception as e:
+            _LOGGER.error("Error creating automation: %s", str(e))
+            create_notification(
+                hass,
+                f"Error creating automation: {str(e)}",
+                title="AI Automation Creator Error",
+                notification_id="ai_automation_creator_error",
+            )
+    
+    async def get_automation_yaml(call):
+        """Get the last created automation YAML."""
+        yaml_content = hass.data[DOMAIN].get("latest_automation", "")
+        _LOGGER.debug("Returning YAML content: %s", yaml_content)
+        
+        # Ensure we're returning a valid response that can be accessed by the frontend
+        return {"yaml": yaml_content}
+    
+    # Register services
     hass.services.async_register(
         DOMAIN, 
         "create_automation", 
-        create_automation, 
-        schema=SERVICE_CREATE_AUTOMATION_SCHEMA
+        create_automation
     )
     
     hass.services.async_register(
-        DOMAIN,
-        "get_automation_yaml",
+        DOMAIN, 
+        "get_automation_yaml", 
         get_automation_yaml
     )
     
