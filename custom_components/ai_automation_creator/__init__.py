@@ -8,6 +8,7 @@ import asyncio
 import concurrent.futures
 import re
 import datetime
+import time
 
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.config_entries import ConfigEntry
@@ -102,16 +103,14 @@ async def setup_services(hass: HomeAssistant):
             
             IMPORTANT REQUIREMENTS:
             1. Return ONLY the YAML for the automation, no explanations or markdown.
-            2. Every automation MUST include a unique 'id' field with a descriptive ID using underscores instead of spaces (e.g., 'turn_on_lights_at_sunset').
-            3. The ID should be descriptive of what the automation does.
-            4. Include appropriate triggers, conditions, and actions based on the request.
-            5. Use proper yaml formatting with correct indentation.
-            6. Include an 'alias' that is human-readable.
-            7. Include a descriptive 'description' field explaining what the automation does.
+            2. Do NOT include an 'id' field - I will add this automatically.
+            3. Include appropriate triggers, conditions, and actions based on the request.
+            4. Use proper yaml formatting with correct indentation.
+            5. Include an 'alias' that is human-readable.
+            6. Include a descriptive 'description' field explaining what the automation does.
             
-            Example format:
+            Example format (do not include the id):
             ```
-            id: lights_on_at_sunset
             alias: Turn on lights at sunset
             description: Turns on the living room lights automatically when the sun sets
             trigger:
@@ -150,41 +149,74 @@ async def setup_services(hass: HomeAssistant):
                 # Check if it's valid YAML
                 automation_data = yaml.safe_load(automation_yaml)
                 
-                # Ensure the automation has an ID
-                if "id" not in automation_data:
-                    # Generate an ID based on the description
-                    base_id = re.sub(r'[^a-z0-9]', '_', description.lower())
-                    base_id = re.sub(r'_+', '_', base_id)  # Replace multiple underscores with a single one
-                    base_id = base_id.strip('_')[:40]  # Limit length and trim underscores at ends
-                    
-                    # Add a timestamp to ensure uniqueness
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-                    automation_id = f"ai_automation_{base_id}_{timestamp}"
-                    
-                    # Add the ID to the automation
-                    automation_data["id"] = automation_id
-                    
-                    # Regenerate the YAML
-                    automation_yaml = yaml.dump(automation_data, default_flow_style=False)
-                    
-                    _LOGGER.info("Added ID to automation: %s", automation_id)
+                # Generate a 13-digit numerical ID
+                automation_id = str(int(time.time() * 1000))  # Current time in milliseconds as a 13-digit number
+                
+                # Add the ID to the automation data
+                if "id" in automation_data:
+                    _LOGGER.info("Automation already had an ID, replacing with: %s", automation_id)
+                
+                automation_data["id"] = automation_id
+                
+                # Regenerate the YAML for a single automation
+                single_automation_yaml = yaml.dump(automation_data, default_flow_style=False)
                 
                 # Store for frontend access
-                hass.data[DOMAIN]["latest_automation"] = automation_yaml
+                hass.data[DOMAIN]["latest_automation"] = single_automation_yaml
                 
-                # Save to file
+                # Save to file with proper formatting for the automations.yaml file
                 automations_path = os.path.join(hass.config.path(), "automations.yaml")
                 
-                if not os.path.exists(automations_path):
-                    with open(automations_path, "w") as f:
-                        f.write("# Automations created by AI Automation Creator\n\n")
-                
-                with open(automations_path, "a") as f:
-                    f.write("\n# AI Generated Automation\n")
-                    f.write(automation_yaml)
-                    f.write("\n")
-                
-                _LOGGER.info("Automation saved to %s", automations_path)
+                try:
+                    # Check if file exists and has content
+                    if os.path.exists(automations_path) and os.path.getsize(automations_path) > 0:
+                        # Read existing automations
+                        with open(automations_path, "r") as f:
+                            content = f.read().strip()
+                            
+                        # Prepare the properly indented automation entry
+                        # First line starts with '- ' and the rest is indented by 2 spaces
+                        indent_level = 2
+                        lines = single_automation_yaml.strip().split('\n')
+                        
+                        # Format the first line with a dash
+                        formatted_lines = [f"- {lines[0]}"]
+                        
+                        # Format the rest of the lines with proper indentation
+                        for line in lines[1:]:
+                            formatted_lines.append(' ' * indent_level + line)
+                        
+                        indented_automation = '\n'.join(formatted_lines)
+                        
+                        # Append to file
+                        with open(automations_path, "a") as f:
+                            f.write("\n\n# AI Generated Automation\n")
+                            f.write(indented_automation)
+                    else:
+                        # Create new automations file with header and first automation
+                        with open(automations_path, "w") as f:
+                            f.write("# Automations created by AI Automation Creator\n\n")
+                            
+                            # Format with leading dash
+                            lines = single_automation_yaml.strip().split('\n')
+                            formatted_lines = [f"- {lines[0]}"]
+                            
+                            # Indent the rest by 2 spaces
+                            for line in lines[1:]:
+                                formatted_lines.append('  ' + line)
+                            
+                            indented_automation = '\n'.join(formatted_lines)
+                            f.write(indented_automation)
+                    
+                    _LOGGER.info("Automation with ID %s saved to %s", automation_id, automations_path)
+                except Exception as e:
+                    _LOGGER.error("Error saving automation to file: %s", str(e))
+                    create_notification(
+                        hass,
+                        f"Error saving to automations.yaml: {str(e)}",
+                        title="AI Automation Creator Error",
+                        notification_id="ai_automation_creator_file_error",
+                    )
                 
                 create_notification(
                     hass,
@@ -193,7 +225,7 @@ async def setup_services(hass: HomeAssistant):
                     notification_id="ai_automation_creator_success",
                 )
                 
-                return {"yaml": automation_yaml}
+                return {"yaml": single_automation_yaml, "id": automation_id}
                 
             except Exception as e:
                 _LOGGER.error("Error generating YAML: %s", str(e))
