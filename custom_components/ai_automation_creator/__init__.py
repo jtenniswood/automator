@@ -6,6 +6,8 @@ import voluptuous as vol
 import openai
 import asyncio
 import concurrent.futures
+import re
+import datetime
 
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.config_entries import ConfigEntry
@@ -96,14 +98,36 @@ async def setup_services(hass: HomeAssistant):
             
             # Simple system prompt
             system_prompt = """
-            Create a valid Home Assistant automation based on this description.
-            Return ONLY the YAML for the automation, no explanations or markdown.
+            You are a Home Assistant automation expert. Create a valid Home Assistant automation based on this description.
+            
+            IMPORTANT REQUIREMENTS:
+            1. Return ONLY the YAML for the automation, no explanations or markdown.
+            2. Every automation MUST include a unique 'id' field with a descriptive ID using underscores instead of spaces (e.g., 'turn_on_lights_at_sunset').
+            3. The ID should be descriptive of what the automation does.
+            4. Include appropriate triggers, conditions, and actions based on the request.
+            5. Use proper yaml formatting with correct indentation.
+            6. Include an 'alias' that is human-readable.
+            7. Include a descriptive 'description' field explaining what the automation does.
+            
+            Example format:
+            ```
+            id: lights_on_at_sunset
+            alias: Turn on lights at sunset
+            description: Turns on the living room lights automatically when the sun sets
+            trigger:
+              - platform: sun
+                event: sunset
+            condition: []
+            action:
+              - service: light.turn_on
+                target:
+                  entity_id: light.living_room
+            mode: single
+            ```
             """
             
             try:
                 # Make the OpenAI API call in the simplest way possible
-                import functools
-                
                 def call_openai():
                     return openai.chat.completions.create(
                         model=DEFAULT_MODEL,
@@ -124,7 +148,26 @@ async def setup_services(hass: HomeAssistant):
                 automation_yaml = automation_yaml.replace("```yaml", "").replace("```", "").strip()
                 
                 # Check if it's valid YAML
-                yaml.safe_load(automation_yaml)
+                automation_data = yaml.safe_load(automation_yaml)
+                
+                # Ensure the automation has an ID
+                if "id" not in automation_data:
+                    # Generate an ID based on the description
+                    base_id = re.sub(r'[^a-z0-9]', '_', description.lower())
+                    base_id = re.sub(r'_+', '_', base_id)  # Replace multiple underscores with a single one
+                    base_id = base_id.strip('_')[:40]  # Limit length and trim underscores at ends
+                    
+                    # Add a timestamp to ensure uniqueness
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+                    automation_id = f"ai_automation_{base_id}_{timestamp}"
+                    
+                    # Add the ID to the automation
+                    automation_data["id"] = automation_id
+                    
+                    # Regenerate the YAML
+                    automation_yaml = yaml.dump(automation_data, default_flow_style=False)
+                    
+                    _LOGGER.info("Added ID to automation: %s", automation_id)
                 
                 # Store for frontend access
                 hass.data[DOMAIN]["latest_automation"] = automation_yaml
