@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers import config_validation as cv
-from homeassistant.components.persistent_notification import create as create_notification
+from homeassistant.components.persistent_notification import create as create_notification, ATTR_MESSAGE, DOMAIN as NOTIFICATION_DOMAIN
 
 from .const import DOMAIN, CONF_OPENAI_API_KEY, DEFAULT_MODEL
 
@@ -234,6 +234,24 @@ async def setup_services(hass: HomeAssistant):
                     
                     _LOGGER.info("Automation also saved to %s", automations_path)
                     
+                    # Send a notification with a clickable link to the automation
+                    notification_message = f"""
+Successfully created automation from: {description}
+<br><br>
+<a href='/config/automation/edit/{automation_id}' target='_blank'>Click here to view or edit the automation</a>
+"""
+                    # Use the service call to ensure HTML rendering works
+                    await hass.services.async_call(
+                        NOTIFICATION_DOMAIN,
+                        "create",
+                        {
+                            "title": "AI Automation Creator Success",
+                            "message": notification_message,
+                            "notification_id": "ai_automation_creator_success",
+                        },
+                        blocking=True
+                    )
+                    
                 except Exception as e:
                     _LOGGER.error("Error creating automation via API, falling back to file creation: %s", str(e))
                     
@@ -292,21 +310,37 @@ async def setup_services(hass: HomeAssistant):
                             blocking=True
                         )
                         
+                        # Provide a notification with a link after file-based creation
+                        notification_message = f"""
+Successfully created automation from: {description}
+<br><br>
+<a href='/config/automation/edit/{automation_id}' target='_blank'>Click here to view or edit the automation</a>
+"""
+                        # Use the service call to ensure HTML rendering works
+                        await hass.services.async_call(
+                            NOTIFICATION_DOMAIN,
+                            "create",
+                            {
+                                "title": "AI Automation Creator Success",
+                                "message": notification_message,
+                                "notification_id": "ai_automation_creator_success",
+                            },
+                            blocking=True
+                        )
+                        
                     except Exception as file_error:
                         _LOGGER.error("Error saving automation to file: %s", str(file_error))
-                        create_notification(
-                            hass,
-                            f"Error saving to automations.yaml: {str(file_error)}",
-                            title="AI Automation Creator Error",
-                            notification_id="ai_automation_creator_file_error",
+                        # Use the service call for error notification too
+                        await hass.services.async_call(
+                            NOTIFICATION_DOMAIN,
+                            "create",
+                            {
+                                "title": "AI Automation Creator Error",
+                                "message": f"Error saving to automations.yaml: {str(file_error)}",
+                                "notification_id": "ai_automation_creator_file_error",
+                            },
+                            blocking=True
                         )
-                
-                create_notification(
-                    hass,
-                    f"Successfully created automation from: {description}",
-                    title="AI Automation Creator Success",
-                    notification_id="ai_automation_creator_success",
-                )
                 
                 return {"yaml": single_automation_yaml, "id": automation_id}
                 
