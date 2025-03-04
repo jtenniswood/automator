@@ -1,5 +1,7 @@
 # AI Automation Creator for Home Assistant
 
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+
 This custom integration allows you to create Home Assistant automations using natural language descriptions powered by OpenAI's GPT-4.
 
 ## Features
@@ -13,10 +15,20 @@ This custom integration allows you to create Home Assistant automations using na
 
 ## Installation
 
-1. Install HACS (Home Assistant Community Store) if you haven't already
-2. Add this repository as a custom repository in HACS
-3. Install the "AI Automation Creator" integration through HACS
-4. Restart Home Assistant
+### HACS Installation (Recommended)
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=yourusername&repository=ai-automation-creator&category=integration)
+
+1. Make sure you have [HACS](https://hacs.xyz/) installed in your Home Assistant instance.
+2. Navigate to HACS → Integrations → Click the three dots in the upper right corner → Custom repositories.
+3. Add this repository URL and select "Integration" as the category.
+4. Click "ADD".
+5. Search for "AI Automation Creator" and install it.
+6. Restart Home Assistant.
+7. Go to Settings → Devices & Services → Add Integration, and search for "AI Automation Creator".
+8. Follow the configuration steps.
+
+For detailed instructions, see [INSTALL.md](INSTALL.md).
 
 ## Configuration
 

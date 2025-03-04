@@ -50,11 +50,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up the OpenAI client
     openai.api_key = entry.data[CONF_OPENAI_API_KEY]
     
+    # Register frontend resources
+    await async_register_frontend(hass)
+    
     # Set up panel
     await async_setup_panel(hass)
-    
-    # Register frontend
-    await async_register_frontend(hass)
     
     # Store automation response for frontend
     hass.data.setdefault(DOMAIN, {})

@@ -1,0 +1,10 @@
+{
+  "name": "AI Automation Creator",
+  "content_in_root": false,
+  "render_readme": true,
+  "domain": "ai_automation_creator",
+  "documentation": "https://github.com/yourusername/ai-automation-creator",
+  "issue_tracker": "https://github.com/yourusername/ai-automation-creator/issues",
+  "iot_class": "cloud_polling",
+  "homeassistant": "2023.8.0"
+} 
