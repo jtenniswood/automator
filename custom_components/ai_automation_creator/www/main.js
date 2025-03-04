@@ -1,23 +1,12 @@
-// Direct import of lit-element to avoid module loading issues
-const LitElement = window.LitElement || Object.getPrototypeOf(customElements.get("ha-panel-lovelace"));
-const html = LitElement.prototype.html;
-const css = LitElement.prototype.css;
+/**
+ * AI Automation Creator
+ * Custom panel for creating Home Assistant automations with natural language
+ */
 
-class AiAutomationCreator extends LitElement {
-  static get properties() {
-    return {
-      hass: { type: Object },
-      panel: { type: Object },
-      userInput: { type: String },
-      isProcessing: { type: Boolean },
-      automationYaml: { type: String },
-      automationCreated: { type: Boolean },
-      errorMessage: { type: String },
-    };
-  }
-
+class AiAutomationCreator extends HTMLElement {
   constructor() {
     super();
+    this.attachShadow({ mode: 'open' });
     this.userInput = "";
     this.isProcessing = false;
     this.automationYaml = "";
@@ -25,26 +14,166 @@ class AiAutomationCreator extends LitElement {
     this.errorMessage = null;
   }
 
-  render() {
-    return html`
-      <ha-card>
-        <div class="card-content">
-          <h2>AI Automation Creator</h2>
-          
-          ${this.automationCreated ? 
-            this.renderResult() : 
-            this.renderForm()}
-        </div>
-      </ha-card>
-    `;
+  setConfig(config) {
+    // Not used but required by HA
   }
 
+  set hass(hass) {
+    // Store hass object
+    this._hass = hass;
+    
+    // Initial render if not done yet
+    if (!this._hasRendered) {
+      this._hasRendered = true;
+      this.render();
+    }
+  }
+  
+  render() {
+    if (!this._hass) {
+      this.shadowRoot.innerHTML = `<div>Loading...</div>`;
+      return;
+    }
+    
+    // Prepare the content based on state
+    let content = this.automationCreated ? this.renderResult() : this.renderForm();
+    
+    // Apply styles and content
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host {
+          display: block;
+          font-family: var(--paper-font-body1_-_font-family);
+          padding: 16px;
+        }
+        .card {
+          background-color: var(--card-background-color);
+          border-radius: 8px;
+          box-shadow: var(--ha-card-box-shadow);
+          padding: 16px;
+          max-width: 800px;
+          margin: 0 auto;
+        }
+        h1 {
+          font-size: 24px;
+          margin-top: 0;
+          margin-bottom: 16px;
+          color: var(--primary-text-color);
+        }
+        p {
+          margin-top: 0;
+          margin-bottom: 12px;
+          color: var(--secondary-text-color);
+        }
+        .examples {
+          background-color: var(--secondary-background-color);
+          border-radius: 8px;
+          padding: 12px;
+          margin: 12px 0;
+        }
+        textarea {
+          width: 100%;
+          min-height: 100px;
+          padding: 8px;
+          border: 1px solid var(--divider-color);
+          border-radius: 4px;
+          margin: 8px 0 16px 0;
+          background-color: var(--card-background-color);
+          color: var(--primary-text-color);
+        }
+        button {
+          background-color: var(--primary-color);
+          color: var(--text-primary-color);
+          border: none;
+          border-radius: 4px;
+          padding: 8px 16px;
+          font-size: 14px;
+          cursor: pointer;
+          margin-right: 8px;
+        }
+        button:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        .success {
+          color: var(--success-color);
+          margin: 16px 0;
+        }
+        .error {
+          color: var(--error-color);
+          margin: 16px 0;
+        }
+        .yaml-container {
+          background-color: var(--code-background-color);
+          padding: 16px;
+          border-radius: 4px;
+          overflow-x: auto;
+          margin: 16px 0;
+          position: relative;
+        }
+        pre {
+          margin: 0;
+          white-space: pre-wrap;
+          font-family: monospace;
+        }
+        .button-container {
+          display: flex;
+          justify-content: flex-end;
+        }
+        .copy-button {
+          position: absolute;
+          top: 16px;
+          right: 16px;
+          background-color: var(--secondary-background-color);
+          color: var(--primary-text-color);
+          font-size: 12px;
+          padding: 4px 8px;
+        }
+        .info-text {
+          font-style: italic;
+          margin-top: 0;
+          font-size: 14px;
+        }
+        h3 {
+          margin-top: 0;
+          margin-bottom: 16px;
+          padding-right: 60px; /* Make space for the copy button */
+        }
+      </style>
+      <div class="card">
+        <h1>AI Automation Creator</h1>
+        ${content}
+      </div>
+    `;
+    
+    // Add event listeners
+    if (!this.automationCreated) {
+      const textarea = this.shadowRoot.querySelector('textarea');
+      const button = this.shadowRoot.querySelector('button');
+      
+      if (textarea) {
+        textarea.addEventListener('input', (e) => {
+          this.userInput = e.target.value;
+          if (button) {
+            button.disabled = !this.userInput.trim();
+          }
+        });
+      }
+      
+      if (button) {
+        button.addEventListener('click', () => this.generateAutomation());
+      }
+    } else {
+      const resetButton = this.shadowRoot.querySelector('button');
+      if (resetButton) {
+        resetButton.addEventListener('click', () => this.reset());
+      }
+    }
+  }
+  
   renderForm() {
-    return html`
-      <p>
-        Describe what you want your automation to do in natural language. Include devices, 
-        triggers, conditions, and actions.
-      </p>
+    return `
+      <p>Describe what you want your automation to do in natural language. Include devices, triggers, conditions, and actions.</p>
       
       <div class="examples">
         <p><strong>Examples:</strong></p>
@@ -54,229 +183,173 @@ class AiAutomationCreator extends LitElement {
           <li>"Send a notification when the front door has been open for more than 5 minutes"</li>
         </ul>
       </div>
-
-      <div class="input-container">
-        <textarea
-          id="userInput"
-          .value=${this.userInput}
-          @input=${(e) => this.userInput = e.target.value}
-          placeholder="Describe your automation here..."
-          rows="5"
-        ></textarea>
-      </div>
-
+      
+      <textarea placeholder="Describe your automation here...">${this.userInput}</textarea>
+      
       <div class="button-container">
-        <mwc-button
-          raised
-          ?disabled=${!this.userInput || this.isProcessing}
-          @click=${this.generateAutomation}
-        >
-          ${this.isProcessing ? "Creating..." : "Create Automation"}
-        </mwc-button>
+        <button ${this.isProcessing || !this.userInput ? 'disabled' : ''}>
+          ${this.isProcessing ? 'Creating...' : 'Create Automation'}
+        </button>
       </div>
-
-      ${this.errorMessage ? html`
-        <div class="error-message">
-          ${this.errorMessage}
-        </div>
-      ` : ''}
+      
+      ${this.errorMessage ? `<div class="error">${this.errorMessage}</div>` : ''}
     `;
   }
-
+  
   renderResult() {
-    return html`
-      <div class="success-container">
-        <p class="success-message">
-          <ha-icon icon="mdi:check-circle"></ha-icon>
-          Automation created successfully!
-        </p>
-        
-        <div class="yaml-container">
-          <h3>Generated Automation:</h3>
-          <pre>${this.automationYaml}</pre>
-        </div>
-        
-        <div class="button-container">
-          <mwc-button raised @click=${this.reset}>
-            Create Another Automation
-          </mwc-button>
-        </div>
+    return `
+      <div class="success">
+        <p><strong>✓ Automation created successfully!</strong></p>
+      </div>
+      
+      <div class="yaml-container">
+        <h3>Generated Automation YAML:</h3>
+        <pre id="yaml-output">${this.automationYaml}</pre>
+        <button id="copy-yaml" class="copy-button">Copy YAML</button>
+      </div>
+      
+      <p class="info-text">This automation has been automatically added to your automations.yaml file.</p>
+      
+      <div class="button-container">
+        <button>Create Another Automation</button>
       </div>
     `;
   }
-
+  
   generateAutomation() {
-    if (!this.userInput.trim()) return;
+    if (!this.userInput.trim() || this.isProcessing) return;
     
     this.isProcessing = true;
     this.errorMessage = null;
+    this.render();
     
     // Call service to create automation
-    this.hass.callService("ai_automation_creator", "create_automation", {
+    this._hass.callService("ai_automation_creator", "create_automation", {
       description: this.userInput,
     })
     .then(() => {
-      // Now get the automation YAML
-      return this.hass.callService("ai_automation_creator", "get_automation_yaml", {});
+      // Wait a moment to ensure the service processes the request
+      return new Promise(resolve => {
+        setTimeout(() => {
+          resolve();
+        }, 1500); // Longer wait to ensure processing completes
+      });
     })
     .then(() => {
-      // Wait a brief moment to make sure the data is updated
-      setTimeout(() => {
-        // Try to get the latest automation from hass data
-        if (this.hass.data && this.hass.data.ai_automation_creator && 
-            this.hass.data.ai_automation_creator.latest_automation) {
-          this.automationYaml = this.hass.data.ai_automation_creator.latest_automation;
-        } else {
-          // Fallback - show generic message
-          this.automationYaml = "Automation created successfully. Check your Home Assistant automations list.";
-        }
-        
+      // Now call the service to get the YAML
+      return this._hass.callService("ai_automation_creator", "get_automation_yaml", {});
+    })
+    .then((result) => {
+      // Check if we can get the result directly
+      if (result && result.yaml) {
+        this.automationYaml = result.yaml;
         this.isProcessing = false;
         this.automationCreated = true;
-        this.requestUpdate();
-      }, 500);
+        this.render();
+        
+        // Add copy functionality
+        setTimeout(() => {
+          const copyButton = this.shadowRoot.querySelector('#copy-yaml');
+          if (copyButton) {
+            copyButton.addEventListener('click', () => {
+              const yamlText = this.shadowRoot.querySelector('#yaml-output').textContent;
+              navigator.clipboard.writeText(yamlText).then(() => {
+                copyButton.textContent = "Copied!";
+                setTimeout(() => {
+                  copyButton.textContent = "Copy YAML";
+                }, 2000);
+              });
+            });
+          }
+        }, 100);
+        
+        return;
+      }
+      
+      // If direct result isn't available, try to get it from hass data
+      return new Promise(resolve => {
+        setTimeout(() => {
+          try {
+            // Look for the latest automation in hass data
+            if (this._hass.data && 
+                this._hass.data.ai_automation_creator && 
+                this._hass.data.ai_automation_creator.latest_automation) {
+              this.automationYaml = this._hass.data.ai_automation_creator.latest_automation;
+            } else {
+              // Check for success notification
+              const notifications = this._hass.states;
+              let automationCreated = false;
+              
+              Object.keys(notifications).forEach(key => {
+                if (key.includes('persistent_notification.ai_automation_creator_success')) {
+                  automationCreated = true;
+                }
+              });
+              
+              // If we can confirm it was created but don't have the YAML, show a message
+              if (automationCreated) {
+                this.automationYaml = "Automation was created successfully and added to your automations.yaml file.";
+              } else {
+                // Fallback message if we can't find confirmation or YAML
+                this.automationYaml = "Automation has been processed. Please check your automations.yaml file.";
+              }
+            }
+            
+            this.isProcessing = false;
+            this.automationCreated = true;
+            this.render();
+            
+            // Add copy functionality
+            setTimeout(() => {
+              const copyButton = this.shadowRoot.querySelector('#copy-yaml');
+              if (copyButton) {
+                copyButton.addEventListener('click', () => {
+                  const yamlText = this.shadowRoot.querySelector('#yaml-output').textContent;
+                  navigator.clipboard.writeText(yamlText).then(() => {
+                    copyButton.textContent = "Copied!";
+                    setTimeout(() => {
+                      copyButton.textContent = "Copy YAML";
+                    }, 2000);
+                  });
+                });
+              }
+            }, 100);
+            
+            resolve();
+          } catch (error) {
+            this.handleError(error);
+            resolve();
+          }
+        }, 1000);
+      });
     })
     .catch((error) => {
-      this.isProcessing = false;
-      this.errorMessage = `Error: ${error.message || "Failed to create automation"}`;
-      this.requestUpdate();
+      this.handleError(error);
     });
   }
-
+  
+  handleError(error) {
+    this.isProcessing = false;
+    this.errorMessage = `Error: ${error.message || "Failed to create automation"}`;
+    this.render();
+  }
+  
   reset() {
     this.userInput = "";
     this.automationYaml = "";
     this.automationCreated = false;
     this.errorMessage = null;
-    this.requestUpdate();
-  }
-
-  static get styles() {
-    return css`
-      :host {
-        display: block;
-        padding: 16px;
-      }
-      
-      ha-card {
-        max-width: 800px;
-        margin: 0 auto;
-        padding: 16px;
-      }
-      
-      .card-content {
-        padding: 0;
-      }
-      
-      h2 {
-        margin-top: 0;
-        margin-bottom: 16px;
-        color: var(--primary-text-color);
-      }
-      
-      p {
-        color: var(--primary-text-color);
-        margin-top: 0;
-      }
-      
-      .examples {
-        background-color: var(--secondary-background-color);
-        border-radius: 8px;
-        padding: 12px 16px;
-        margin: 16px 0;
-      }
-      
-      .examples ul {
-        margin: 8px 0 0 0;
-        padding-left: 20px;
-      }
-      
-      .examples li {
-        margin-bottom: 8px;
-      }
-      
-      .input-container {
-        margin: 16px 0;
-      }
-      
-      textarea {
-        width: 100%;
-        min-height: 120px;
-        padding: 12px;
-        border: 1px solid var(--divider-color);
-        border-radius: 4px;
-        background-color: var(--card-background-color);
-        color: var(--primary-text-color);
-        font-size: 16px;
-        resize: vertical;
-        box-sizing: border-box;
-      }
-      
-      textarea:focus {
-        outline: none;
-        border-color: var(--primary-color);
-      }
-      
-      .button-container {
-        display: flex;
-        justify-content: flex-end;
-        margin: 16px 0;
-      }
-      
-      .error-message {
-        color: var(--error-color);
-        padding: 12px;
-        border-radius: 4px;
-        background-color: rgba(var(--rgb-error), 0.1);
-        margin-top: 16px;
-      }
-      
-      .success-container {
-        display: flex;
-        flex-direction: column;
-      }
-      
-      .success-message {
-        display: flex;
-        align-items: center;
-        color: var(--success-color);
-        font-size: 18px;
-        font-weight: 500;
-      }
-      
-      .success-message ha-icon {
-        --mdc-icon-size: 24px;
-        margin-right: 8px;
-      }
-      
-      .yaml-container {
-        background-color: var(--code-background-color, #f5f5f5);
-        border-radius: 4px;
-        padding: 16px;
-        margin: 16px 0;
-        overflow-x: auto;
-      }
-      
-      .yaml-container h3 {
-        margin-top: 0;
-        margin-bottom: 8px;
-      }
-      
-      pre {
-        margin: 0;
-        white-space: pre-wrap;
-        word-break: break-word;
-        font-family: monospace;
-      }
-    `;
+    this.render();
   }
 }
 
-customElements.define("ai-automation-creator", AiAutomationCreator);
+// Register the element
+customElements.define('ai-automation-creator', AiAutomationCreator);
 
+// Tell Home Assistant this can be used as a custom card
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "ai-automation-creator",
   name: "AI Automation Creator",
-  description: "Create automations using natural language with AI assistance.",
+  description: "Create automations using natural language"
 }); 

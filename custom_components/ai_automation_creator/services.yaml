@@ -1,17 +1,17 @@
 create_automation:
   name: Create Automation
-  description: Create a Home Assistant automation using natural language descriptions.
+  description: Create a Home Assistant automation using natural language
   fields:
     description:
       name: Description
-      description: Natural language description of the automation you want to create.
+      description: Natural language description of the automation
       required: true
-      example: "Turn on the living room lights when motion is detected in the hallway, but only if it's after sunset."
+      example: "Turn on the living room lights when motion is detected in the hallway after sunset"
       selector:
         text:
           multiline: true
 
 get_automation_yaml:
   name: Get Automation YAML
-  description: Get the YAML of the last created automation.
+  description: Get the YAML for the last created automation
   fields: {} 

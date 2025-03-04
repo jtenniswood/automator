@@ -1,95 +1,75 @@
 # AI Automation Creator for Home Assistant
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+Create Home Assistant automations with natural language using OpenAI.
 
-This custom integration allows you to create Home Assistant automations using natural language descriptions powered by OpenAI's GPT-4.
+## Overview
+
+AI Automation Creator is a custom integration for Home Assistant that allows you to create automations using natural language descriptions. Simply describe what you want your automation to do, and the integration will generate the necessary YAML code and add it to your configuration.
 
 ## Features
 
-- Create automations using natural language descriptions
-- Automatically detects available entities in your Home Assistant instance
-- Generates valid YAML configurations for automations
-- Easy to use service call interface
-- **Interactive UI with guided automation creation** - NEW!
-- **Sidebar menu access for quick access** - NEW!
+- **Natural Language Interface**: Describe your automation in plain English
+- **OpenAI Integration**: Uses OpenAI's language models to convert descriptions into YAML
+- **Simple Installation**: Easy setup through Home Assistant's UI
+- **YAML Generation**: Automatically generates valid automation YAML
+- **Sidebar Panel**: Dedicated sidebar panel for a smooth user experience
 
 ## Installation
 
 ### HACS Installation (Recommended)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=yourusername&repository=ai-automation-creator&category=integration)
+1. Make sure [HACS](https://hacs.xyz/) is installed in your Home Assistant instance
+2. Go to HACS → Integrations → "+" button
+3. Search for "AI Automation Creator" and install it
+4. Restart Home Assistant
 
-1. Make sure you have [HACS](https://hacs.xyz/) installed in your Home Assistant instance.
-2. Navigate to HACS → Integrations → Click the three dots in the upper right corner → Custom repositories.
-3. Add this repository URL and select "Integration" as the category.
-4. Click "ADD".
-5. Search for "AI Automation Creator" and install it.
-6. Restart Home Assistant.
-7. Go to Settings → Devices & Services → Add Integration, and search for "AI Automation Creator".
-8. Follow the configuration steps.
+### Manual Installation
 
-For detailed instructions, see [INSTALL.md](INSTALL.md).
+1. Download the latest release
+2. Copy the `custom_components/ai_automation_creator` folder to your Home Assistant's `custom_components` directory
+3. Restart Home Assistant
 
 ## Configuration
 
-1. Go to Settings → Devices & Services
-2. Click "Add Integration"
+After installation, add the integration through the Home Assistant UI:
+
+1. Go to Configuration → Integrations
+2. Click "+ Add Integration"
 3. Search for "AI Automation Creator"
 4. Enter your OpenAI API key
-5. Complete the setup
+
+### Configuration Options
+
+- **OpenAI API Key**: Your OpenAI API key (required)
+- **Model**: The OpenAI model to use (default: gpt-3.5-turbo)
 
 ## Usage
 
-You can create automations in three ways:
+1. After installation, you'll see the "AI Automation Creator" icon in your sidebar
+2. Click on it to open the interface
+3. Enter a description of the automation you want to create
+4. Click "Create Automation"
+5. The integration will generate the automation YAML and add it to your automations.yaml file
 
-### 1. Using the Interactive UI (Recommended)
+### Example Descriptions
 
-1. Click on the "AI Automation" icon in the sidebar menu
-2. Follow the guided conversation to describe your automation needs
-3. The AI will ask you specific questions to understand what you want
-4. Review the generated automation and click "Create Automation"
-5. Your automation is now available in Home Assistant!
-
-### 2. Using the Service Call
-
-You can call the service directly from Home Assistant:
-
-```yaml
-service: ai_automation_creator.create_automation
-data:
-  description: "Turn on the living room lights when motion is detected in the hallway"
-```
-
-### 3. Using the Developer Tools
-
-1. Go to Developer Tools → Services
-2. Select `ai_automation_creator.create_automation`
-3. Enter your automation description in the `description` field
-4. Click "Call Service"
-
-## Example Descriptions
-
-Here are some example descriptions you can use:
-
-- "Turn off all lights when no motion is detected for 30 minutes"
+- "Turn on the living room lights when motion is detected in the hallway after sunset"
 - "Set the thermostat to 72°F when someone arrives home"
-- "Turn on the porch light at sunset and off at sunrise"
-- "Send a notification when the garage door has been open for more than 10 minutes"
+- "Send a notification when the front door has been open for more than 5 minutes"
 
-## Requirements
+## Troubleshooting
 
-- Home Assistant 2023.8 or later
-- OpenAI API key
-- HACS installed
-
-## Container Support
-
-This integration is fully compatible with Home Assistant running in a container. The integration operates entirely within the Home Assistant environment and doesn't require any external system access.
+- **Panel Not Appearing**: Make sure you've restarted Home Assistant after installation
+- **API Key Errors**: Verify your OpenAI API key is valid and has sufficient credits
+- **YAML Generation Errors**: Try using more specific descriptions or different phrasing
 
 ## Support
 
-If you encounter any issues or have questions, please open an issue in the GitHub repository.
+If you encounter issues or have suggestions:
+
+- Open an issue on GitHub
+- Join the Home Assistant community forum
 
 ## License
 
-MIT License # Test comment
+This project is licensed under the MIT License - see the LICENSE file for details.
