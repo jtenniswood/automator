@@ -17,9 +17,19 @@ _LOGGER = logging.getLogger(__name__)
 async def validate_api_key(api_key: str) -> bool:
     """Test if the API key is valid."""
     try:
+        # Set the API key
         openai.api_key = api_key
-        # Make a simple API call to verify the key works
-        models = await openai.models.list()
+        
+        # Using a simple synchronous call wrapped in async executor
+        from functools import partial
+        from homeassistant.helpers.executor import async_call_executor
+        
+        # Create a partial function for the synchronous call
+        sync_func = partial(openai.models.list)
+        
+        # Execute the function in the executor
+        await async_call_executor(sync_func)
+        _LOGGER.info("Successfully validated OpenAI API key")
         return True
     except Exception as e:
         _LOGGER.error("Failed to validate OpenAI API key: %s", str(e))

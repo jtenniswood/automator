@@ -51,6 +51,14 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         "latest_automation": None
     }
     
+    # Set the OpenAI API key if provided in the config
+    if CONF_OPENAI_API_KEY in conf:
+        api_key = conf[CONF_OPENAI_API_KEY]
+        openai.api_key = api_key
+        _LOGGER.info("OpenAI API key configured from YAML")
+    else:
+        _LOGGER.warning("No OpenAI API key provided in configuration")
+    
     # Set up services
     await async_setup_services(hass)
     
@@ -99,7 +107,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Set OpenAI API key
     if CONF_OPENAI_API_KEY in entry.data:
-        openai.api_key = entry.data[CONF_OPENAI_API_KEY]
+        api_key = entry.data[CONF_OPENAI_API_KEY]
+        openai.api_key = api_key
+        _LOGGER.info("OpenAI API key configured from config entry")
+        
+        # Validate the API key to make sure it works
+        try:
+            # Using a simple synchronous call wrapped in async executor
+            from functools import partial
+            from homeassistant.helpers.executor import async_call_executor
+            
+            # Create a partial function for the synchronous call
+            sync_func = partial(openai.models.list)
+            
+            # Execute the function in the executor
+            await async_call_executor(sync_func)
+            _LOGGER.info("OpenAI API key validation successful")
+        except Exception as e:
+            _LOGGER.error("OpenAI API key validation failed: %s", str(e))
+            create_notification(
+                hass,
+                f"OpenAI API key validation failed: {str(e)}. Check your API key and try again.",
+                title="AI Automation Creator Error",
+                notification_id="ai_automation_creator_api_key_error",
+            )
+    else:
+        _LOGGER.error("No OpenAI API key provided in the config entry")
+        create_notification(
+            hass,
+            "No OpenAI API key provided. Please reconfigure the integration.",
+            title="AI Automation Creator Error",
+            notification_id="ai_automation_creator_missing_key_error",
+        )
     
     # Make sure services are set up
     await async_setup_services(hass)
@@ -156,6 +195,10 @@ async def async_setup_services(hass: HomeAssistant):
             )
             return
         
+        # Log the API key being used (masked for security)
+        masked_key = f"{openai.api_key[:5]}...{openai.api_key[-4:]}" if len(openai.api_key) > 10 else "[Invalid Key]"
+        _LOGGER.debug("Using OpenAI API key: %s", masked_key)
+        
         try:
             _LOGGER.info("Creating automation from description: %s", description)
             
@@ -185,7 +228,17 @@ async def async_setup_services(hass: HomeAssistant):
                     # action configuration
                 """
                 
-                response = openai.chat.completions.create(
+                # Run the OpenAI API call in an executor to avoid blocking
+                from functools import partial
+                from homeassistant.helpers.executor import async_call_executor
+                
+                # Log the API call attempt with the API key (masked)
+                masked_key = f"{openai.api_key[:5]}...{openai.api_key[-4:]}" if openai.api_key and len(openai.api_key) > 10 else "Invalid Key"
+                _LOGGER.debug("Calling OpenAI API with key %s and model %s", masked_key, DEFAULT_MODEL)
+                
+                # Create a partial function for the synchronous OpenAI call
+                sync_func = partial(
+                    openai.chat.completions.create,
                     model=DEFAULT_MODEL,
                     messages=[
                         {"role": "system", "content": system_prompt},
@@ -193,6 +246,12 @@ async def async_setup_services(hass: HomeAssistant):
                     ],
                     temperature=0.2,
                 )
+                
+                # Execute the function in the executor
+                response = await async_call_executor(sync_func)
+                
+                # Log success
+                _LOGGER.info("Successfully received response from OpenAI API")
                 
                 automation_yaml = response.choices[0].message.content.strip()
                 
