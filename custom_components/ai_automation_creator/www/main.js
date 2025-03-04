@@ -4,31 +4,21 @@ class AiAutomationCreator extends LitElement {
   static get properties() {
     return {
       hass: { type: Object },
-      conversation: { type: Array },
       userInput: { type: String },
       isProcessing: { type: Boolean },
       automationYaml: { type: String },
       automationCreated: { type: Boolean },
-      currentStep: { type: Number },
-      automationSteps: { type: Array },
+      resultMessage: { type: String },
     };
   }
 
   constructor() {
     super();
-    this.conversation = [];
     this.userInput = "";
     this.isProcessing = false;
     this.automationYaml = "";
     this.automationCreated = false;
-    this.currentStep = 0;
-    this.automationSteps = [
-      { question: "What would you like this automation to do? (Describe in natural language)", answer: "" },
-      { question: "When should this automation trigger? (Time, event, condition, etc.)", answer: "" },
-      { question: "Which devices or entities should be involved?", answer: "" },
-      { question: "Are there any conditions that should be met before the automation runs?", answer: "" },
-      { question: "Is there anything else I should know about this automation?", answer: "" },
-    ];
+    this.resultMessage = "";
   }
 
   render() {
@@ -40,71 +30,64 @@ class AiAutomationCreator extends LitElement {
       <div class="card-container">
         <ha-card header="AI Automation Creator">
           <div class="card-content">
-            ${this.automationCreated ? this.renderResult() : this.renderConversation()}
+            ${this.automationCreated ? this.renderResult() : this.renderPrompt()}
           </div>
         </ha-card>
       </div>
     `;
   }
 
-  renderConversation() {
+  renderPrompt() {
     return html`
-      <div class="conversation">
-        <div class="messages">
-          ${this.conversation.map(
-            (message) => html`
-              <div class="message ${message.sender}">
-                <div class="content">${message.content}</div>
-              </div>
-            `
-          )}
+      <div class="automation-creator">
+        <div class="prompt-container">
+          <h3>Describe the automation you want to create</h3>
+          <p>
+            Describe what you want your automation to do in natural language. Include any devices, 
+            triggers, conditions, and actions that should be part of your automation.
+          </p>
+          
+          <div class="examples">
+            <p class="examples-header">Examples:</p>
+            <ul>
+              <li>"Turn on the living room lights when motion is detected in the hallway, but only if it's after sunset"</li>
+              <li>"Set the thermostat to 72°F when someone arrives home"</li>
+              <li>"Send a notification when the front door has been open for more than 5 minutes"</li>
+            </ul>
+          </div>
+
+          <div class="input-container">
+            <div class="input-row">
+              <textarea
+                id="userInputField"
+                class="user-input"
+                .value=${this.userInput}
+                @input=${(e) => (this.userInput = e.target.value)}
+                placeholder="Describe your automation here..."
+                rows="5"
+              ></textarea>
+            </div>
+            
+            <div class="button-row">
+              <mwc-button 
+                raised 
+                ?disabled=${!this.userInput}
+                @click=${this.createAutomation}
+              >
+                Create Automation
+              </mwc-button>
+            </div>
+          </div>
         </div>
 
         ${this.isProcessing
-          ? html`<div class="processing">Processing your request...</div>`
-          : html`
-              <div class="current-question">
-                <h3>${this.automationSteps[this.currentStep].question}</h3>
-              </div>
-              
-              <div class="input-container">
-                <div class="input-row">
-                  <textarea
-                    id="userInputField"
-                    class="user-input"
-                    .value=${this.userInput}
-                    @input=${(e) => (this.userInput = e.target.value)}
-                    placeholder="Type your answer here..."
-                    rows="3"
-                  ></textarea>
-                </div>
-                
-                <div class="button-row">
-                  <mwc-button 
-                    raised 
-                    ?disabled=${!this.userInput}
-                    @click=${this.handleSend}
-                  >
-                    Send
-                  </mwc-button>
-                </div>
-              </div>
-            `}
-
-        ${this.currentStep >= this.automationSteps.length
           ? html`
-              <div class="create-button-container">
-                <mwc-button
-                  raised
-                  @click=${this.createAutomation}
-                  ?disabled=${this.isProcessing}
-                  class="create-button"
-                >
-                  Create Automation
-                </mwc-button>
+              <div class="processing">
+                <div class="processing-spinner"></div>
+                <div class="processing-text">Creating your automation...</div>
               </div>
             `
-          : ""}
+          : ''}
       </div>
     `;
   }
@@ -114,10 +97,11 @@ class AiAutomationCreator extends LitElement {
       <div class="result">
         <div class="success-message">
           <ha-icon icon="mdi:check-circle" class="success-icon"></ha-icon>
-          <div>Automation created successfully!</div>
+          <div>${this.resultMessage}</div>
         </div>
 
         <div class="yaml-preview">
+          <h3>Automation YAML</h3>
           <pre>${this.automationYaml}</pre>
         </div>
 
@@ -128,98 +112,50 @@ class AiAutomationCreator extends LitElement {
     `;
   }
 
-  handleSend() {
-    if (!this.userInput.trim()) return;
-
-    // Add user message to conversation
-    this.conversation = [
-      ...this.conversation,
-      { sender: "user", content: this.userInput },
-    ];
-
-    // Save answer to current step
-    this.automationSteps[this.currentStep].answer = this.userInput;
-    
-    // Clear input
-    this.userInput = "";
-    
-    // Move to next step
-    if (this.currentStep < this.automationSteps.length - 1) {
-      this.currentStep++;
-      
-      // Add assistant question to conversation
-      this.conversation = [
-        ...this.conversation,
-        { sender: "assistant", content: this.automationSteps[this.currentStep].question },
-      ];
-    } else {
-      this.currentStep = this.automationSteps.length;
-    }
-    
-    // Force update to reflect changes
-    this.requestUpdate();
-  }
-
   createAutomation() {
-    this.isProcessing = true;
+    if (!this.userInput.trim()) return;
     
-    // Prepare the description by combining all answers
-    let fullDescription = "";
-    this.automationSteps.forEach(step => {
-      fullDescription += `${step.question}\n${step.answer}\n\n`;
-    });
+    this.isProcessing = true;
     
     // Call the service to create automation
     this.hass.callService("ai_automation_creator", "create_automation", {
-      description: fullDescription,
+      description: this.userInput.trim(),
     }).then(
       (result) => {
-        // Get the result from backend (the created automation YAML)
-        this.conversation = [
-          ...this.conversation,
-          { 
-            sender: "assistant", 
-            content: "I've created your automation! You can find it in your automations.yaml file or in the automation editor." 
-          },
-        ];
-        this.automationCreated = true;
+        // Success
+        this.resultMessage = "Automation created successfully! You can find it in your automations.yaml file or in the automation editor.";
         this.isProcessing = false;
+        this.automationCreated = true;
         
-        // Get the latest automation from Home Assistant
-        this.hass.callApi("GET", "config/automation/config/0").then(
-          (automation) => {
-            this.automationYaml = JSON.stringify(automation, null, 2);
-          }
-        ).catch(error => {
-          this.automationYaml = "Automation created successfully, but couldn't retrieve the YAML.";
-          console.error("Failed to retrieve automation:", error);
-        });
+        // Get the latest automation 
+        if (this.hass.states["persistent_notification.ai_automation_creator_success"]) {
+          // We have a notification with the automation
+          this.automationYaml = this.hass.data?.ai_automation_creator?.latest_automation || 
+                               "Automation created successfully. The YAML is available in your Home Assistant automations.yaml file.";
+        } else {
+          // Try to get it from the hass data
+          this.automationYaml = this.hass.data?.ai_automation_creator?.latest_automation || 
+                               "Automation created successfully. The YAML is available in your Home Assistant automations.yaml file.";
+        }
       },
       (error) => {
-        this.conversation = [
-          ...this.conversation,
-          { 
-            sender: "assistant", 
-            content: "Sorry, there was an error creating your automation: " + error.message 
-          },
-        ];
+        // Error
+        this.resultMessage = `Error creating automation: ${error.message || "Unknown error"}`;
         this.isProcessing = false;
+        this.automationCreated = true;
+        this.automationYaml = "Failed to create automation. Please try again with a more detailed description.";
       }
     );
+    
+    // Force update
+    this.requestUpdate();
   }
 
   startOver() {
-    this.conversation = [];
     this.userInput = "";
     this.automationYaml = "";
     this.automationCreated = false;
-    this.currentStep = 0;
-    this.automationSteps.forEach(step => step.answer = "");
-    
-    // Add first question to conversation
-    this.conversation = [
-      { sender: "assistant", content: this.automationSteps[0].question },
-    ];
+    this.resultMessage = "";
     
     // Force update
     this.requestUpdate();
@@ -246,51 +182,52 @@ class AiAutomationCreator extends LitElement {
         padding: 16px;
       }
       
-      .conversation {
+      .automation-creator {
         display: flex;
         flex-direction: column;
-        height: 100%;
       }
       
-      .messages {
+      .prompt-container {
         margin-bottom: 24px;
-        max-height: 400px;
-        overflow-y: auto;
-        border: 1px solid var(--divider-color, #e0e0e0);
-        border-radius: 8px;
-        padding: 16px;
-        background-color: var(--card-background-color, #fff);
       }
       
-      .message {
-        margin-bottom: 12px;
-        padding: 10px 14px;
-        border-radius: 8px;
-        max-width: 80%;
-        word-break: break-word;
-      }
-      
-      .message.user {
-        background-color: var(--primary-color);
-        color: var(--text-primary-color, white);
-        align-self: flex-end;
-        margin-left: auto;
-      }
-      
-      .message.assistant {
-        background-color: var(--secondary-background-color);
+      .prompt-container h3 {
+        margin-top: 0;
+        margin-bottom: 8px;
         color: var(--primary-text-color);
-        align-self: flex-start;
       }
       
-      .current-question {
+      .prompt-container p {
+        margin-top: 0;
         margin-bottom: 16px;
+        color: var(--secondary-text-color);
       }
       
-      .current-question h3 {
+      .examples {
+        background-color: var(--secondary-background-color);
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin-bottom: 24px;
+      }
+      
+      .examples-header {
+        font-weight: 500;
+        margin-top: 0;
+        margin-bottom: 8px;
+      }
+      
+      .examples ul {
         margin: 0;
-        font-size: 18px;
-        color: var(--primary-text-color);
+        padding-left: 24px;
+      }
+      
+      .examples li {
+        margin-bottom: 8px;
+        font-style: italic;
+      }
+      
+      .examples li:last-child {
+        margin-bottom: 0;
       }
       
       .input-container {
@@ -331,25 +268,34 @@ class AiAutomationCreator extends LitElement {
       }
       
       .processing {
-        padding: 24px;
         display: flex;
-        justify-content: center;
+        flex-direction: column;
         align-items: center;
-        font-style: italic;
-        color: var(--secondary-text-color);
+        justify-content: center;
+        padding: 24px;
         background-color: var(--secondary-background-color);
         border-radius: 8px;
-        margin-bottom: 16px;
-      }
-      
-      .create-button-container {
-        display: flex;
-        justify-content: center;
         margin-top: 16px;
       }
       
-      .create-button {
-        --mdc-theme-primary: var(--success-color, #4CAF50);
+      .processing-spinner {
+        width: 32px;
+        height: 32px;
+        margin-bottom: 16px;
+        border: 3px solid var(--divider-color);
+        border-top: 3px solid var(--primary-color);
+        border-radius: 50%;
+        animation: spin 1.5s linear infinite;
+      }
+      
+      .processing-text {
+        font-style: italic;
+        color: var(--secondary-text-color);
+      }
+      
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
       }
       
       .result {
@@ -380,6 +326,11 @@ class AiAutomationCreator extends LitElement {
         overflow-x: auto;
       }
       
+      .yaml-preview h3 {
+        margin-top: 0;
+        margin-bottom: 16px;
+      }
+      
       pre {
         margin: 0;
         white-space: pre-wrap;
@@ -394,8 +345,8 @@ class AiAutomationCreator extends LitElement {
       }
       
       @media (max-width: 600px) {
-        .message {
-          max-width: 95%;
+        .card-content {
+          padding: 12px;
         }
       }
     `;
@@ -403,13 +354,6 @@ class AiAutomationCreator extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
-    
-    // Start the conversation with the first question
-    if (this.conversation.length === 0) {
-      this.conversation = [
-        { sender: "assistant", content: this.automationSteps[0].question },
-      ];
-    }
   }
   
   // This is called when panel is first created

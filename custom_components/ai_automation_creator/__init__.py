@@ -10,7 +10,7 @@ import openai
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.components.persistent_notification import create as create_notification
@@ -83,6 +83,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             notification_id="ai_automation_creator_panel_error",
         )
     
+    @callback
+    def update_frontend_data(yaml_content):
+        """Update the frontend data with the latest automation YAML."""
+        hass.data[DOMAIN]["latest_automation"] = yaml_content
+    
     async def create_automation(call: ServiceCall) -> None:
         """Create an automation based on natural language description."""
         description = call.data.get("description")
@@ -133,7 +138,7 @@ Please provide the automation configuration in YAML format. The YAML should be v
                 automation_yaml = automation_yaml.split("```")[1].split("```")[0].strip()
             
             # Store for frontend
-            hass.data[DOMAIN]["latest_automation"] = automation_yaml
+            update_frontend_data(automation_yaml)
             
             # Save the automation to a file
             automation_path = f"{hass.config.config_dir}/automations.yaml"
@@ -173,11 +178,23 @@ Please provide the automation configuration in YAML format. The YAML should be v
             )
             raise
 
+    # Expose automation YAML to frontend
+    async def get_automation_yaml(call):
+        """Get the last created automation YAML."""
+        return {"yaml": hass.data[DOMAIN].get("latest_automation", "")}
+    
+    # Register services
     hass.services.async_register(
         DOMAIN, 
         "create_automation", 
         create_automation, 
         schema=SERVICE_CREATE_AUTOMATION_SCHEMA
+    )
+    
+    hass.services.async_register(
+        DOMAIN,
+        "get_automation_yaml",
+        get_automation_yaml
     )
     
     _LOGGER.info("AI Automation Creator is ready")
@@ -186,4 +203,5 @@ Please provide the automation configuration in YAML format. The YAML should be v
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     hass.services.async_remove(DOMAIN, "create_automation")
+    hass.services.async_remove(DOMAIN, "get_automation_yaml")
     return True 

@@ -9,4 +9,9 @@ create_automation:
       example: "Turn on the living room lights when motion is detected in the hallway, but only if it's after sunset."
       selector:
         text:
-          multiline: true 
+          multiline: true
+
+get_automation_yaml:
+  name: Get Automation YAML
+  description: Get the YAML of the last created automation.
+  fields: {} 
