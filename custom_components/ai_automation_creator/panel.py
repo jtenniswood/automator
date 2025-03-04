@@ -1,7 +1,11 @@
 """Panel for AI Automation Creator."""
 import voluptuous as vol
 import logging
+import os
+from pathlib import Path
+
 from homeassistant.components import panel_custom
+from homeassistant.components.frontend import async_register_built_in_panel
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
@@ -29,9 +33,24 @@ async def async_setup_panel(hass: HomeAssistant):
     sidebar_title = config.get("sidebar_title", "AI Automation")
     sidebar_icon = config.get("sidebar_icon", "mdi:robot")
     
+    root_path = Path(__file__).parent
+    
+    # Make sure the www directory exists
+    www_path = root_path / "www"
+    if not os.path.exists(www_path):
+        _LOGGER.warning("www directory doesn't exist, creating it")
+        os.makedirs(www_path, exist_ok=True)
+    
+    # Make sure main.js exists
+    js_path = www_path / "main.js"
+    if not os.path.exists(js_path):
+        _LOGGER.error("main.js doesn't exist at %s", js_path)
+        return False
+    
     try:
         # Register the panel
-        await hass.components.frontend.async_register_built_in_panel(
+        await async_register_built_in_panel(
+            hass,
             component_name="custom",
             sidebar_title=sidebar_title,
             sidebar_icon=sidebar_icon,
@@ -41,12 +60,14 @@ async def async_setup_panel(hass: HomeAssistant):
                     "name": "ai-automation-creator",
                     "module_url": FRONTEND_SCRIPT_URL,
                     "embed_iframe": False,
+                    "trust_external": False,
                 }
             },
             require_admin=True,
         )
+        
+        _LOGGER.info("Successfully registered AI Automation Creator panel")
+        return True
     except Exception as ex:
-        _LOGGER.error("Could not register panel %s", ex)
-        return False
-    
-    return True 
+        _LOGGER.error("Could not register panel: %s", ex)
+        return False 

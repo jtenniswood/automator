@@ -32,12 +32,18 @@ class AiAutomationCreator extends LitElement {
   }
 
   render() {
+    if (!this.hass) {
+      return html`<p>Loading...</p>`;
+    }
+    
     return html`
-      <ha-card header="AI Automation Creator">
-        <div class="card-content">
-          ${this.automationCreated ? this.renderResult() : this.renderConversation()}
-        </div>
-      </ha-card>
+      <div class="card-container">
+        <ha-card header="AI Automation Creator">
+          <div class="card-content">
+            ${this.automationCreated ? this.renderResult() : this.renderConversation()}
+          </div>
+        </ha-card>
+      </div>
     `;
   }
 
@@ -55,35 +61,48 @@ class AiAutomationCreator extends LitElement {
         </div>
 
         ${this.isProcessing
-          ? html`<div class="processing">Processing...</div>`
+          ? html`<div class="processing">Processing your request...</div>`
           : html`
               <div class="current-question">
-                ${this.automationSteps[this.currentStep].question}
+                <h3>${this.automationSteps[this.currentStep].question}</h3>
               </div>
-              <div class="input-row">
-                <ha-textarea
-                  .value=${this.userInput}
-                  @input=${(e) => (this.userInput = e.target.value)}
-                  placeholder="Type your answer here..."
-                  autogrow
-                ></ha-textarea>
-                <ha-icon-button
-                  .disabled=${!this.userInput}
-                  @click=${this.handleSend}
-                  path="M2,21L23,12L2,3V10L17,12L2,14V21Z"
-                ></ha-icon-button>
+              
+              <div class="input-container">
+                <div class="input-row">
+                  <textarea
+                    id="userInputField"
+                    class="user-input"
+                    .value=${this.userInput}
+                    @input=${(e) => (this.userInput = e.target.value)}
+                    placeholder="Type your answer here..."
+                    rows="3"
+                  ></textarea>
+                </div>
+                
+                <div class="button-row">
+                  <mwc-button 
+                    raised 
+                    ?disabled=${!this.userInput}
+                    @click=${this.handleSend}
+                  >
+                    Send
+                  </mwc-button>
+                </div>
               </div>
             `}
 
         ${this.currentStep >= this.automationSteps.length
           ? html`
-              <ha-button
-                @click=${this.createAutomation}
-                .disabled=${this.isProcessing}
-                class="create-button"
-              >
-                Create Automation
-              </ha-button>
+              <div class="create-button-container">
+                <mwc-button
+                  raised
+                  @click=${this.createAutomation}
+                  ?disabled=${this.isProcessing}
+                  class="create-button"
+                >
+                  Create Automation
+                </mwc-button>
+              </div>
             `
           : ""}
       </div>
@@ -103,7 +122,7 @@ class AiAutomationCreator extends LitElement {
         </div>
 
         <div class="buttons">
-          <ha-button @click=${this.startOver}>Create Another</ha-button>
+          <mwc-button raised @click=${this.startOver}>Create Another</mwc-button>
         </div>
       </div>
     `;
@@ -136,6 +155,9 @@ class AiAutomationCreator extends LitElement {
     } else {
       this.currentStep = this.automationSteps.length;
     }
+    
+    // Force update to reflect changes
+    this.requestUpdate();
   }
 
   createAutomation() {
@@ -168,7 +190,10 @@ class AiAutomationCreator extends LitElement {
           (automation) => {
             this.automationYaml = JSON.stringify(automation, null, 2);
           }
-        );
+        ).catch(error => {
+          this.automationYaml = "Automation created successfully, but couldn't retrieve the YAML.";
+          console.error("Failed to retrieve automation:", error);
+        });
       },
       (error) => {
         this.conversation = [
@@ -195,13 +220,29 @@ class AiAutomationCreator extends LitElement {
     this.conversation = [
       { sender: "assistant", content: this.automationSteps[0].question },
     ];
+    
+    // Force update
+    this.requestUpdate();
   }
 
   static get styles() {
     return css`
-      ha-card {
+      :host {
+        display: block;
+        padding: 16px;
+      }
+      
+      .card-container {
         max-width: 800px;
         margin: 0 auto;
+      }
+      
+      ha-card {
+        width: 100%;
+        margin-bottom: 16px;
+      }
+      
+      .card-content {
         padding: 16px;
       }
       
@@ -212,21 +253,26 @@ class AiAutomationCreator extends LitElement {
       }
       
       .messages {
-        flex: 1;
+        margin-bottom: 24px;
+        max-height: 400px;
         overflow-y: auto;
-        margin-bottom: 16px;
+        border: 1px solid var(--divider-color, #e0e0e0);
+        border-radius: 8px;
+        padding: 16px;
+        background-color: var(--card-background-color, #fff);
       }
       
       .message {
-        margin-bottom: 8px;
-        padding: 8px 12px;
+        margin-bottom: 12px;
+        padding: 10px 14px;
         border-radius: 8px;
         max-width: 80%;
+        word-break: break-word;
       }
       
       .message.user {
         background-color: var(--primary-color);
-        color: white;
+        color: var(--text-primary-color, white);
         align-self: flex-end;
         margin-left: auto;
       }
@@ -238,30 +284,72 @@ class AiAutomationCreator extends LitElement {
       }
       
       .current-question {
-        margin-bottom: 8px;
-        font-weight: 500;
+        margin-bottom: 16px;
+      }
+      
+      .current-question h3 {
+        margin: 0;
+        font-size: 18px;
+        color: var(--primary-text-color);
+      }
+      
+      .input-container {
+        display: flex;
+        flex-direction: column;
+        margin-bottom: 16px;
+        border: 1px solid var(--divider-color, #e0e0e0);
+        border-radius: 8px;
+        overflow: hidden;
       }
       
       .input-row {
         display: flex;
-        align-items: flex-end;
+        width: 100%;
       }
       
-      ha-textarea {
-        flex: 1;
-        min-height: 56px;
+      .user-input {
+        width: 100%;
+        min-height: 60px;
+        padding: 12px;
+        border: none;
+        background-color: var(--card-background-color, #fff);
+        color: var(--primary-text-color);
+        font-size: 16px;
+        resize: vertical;
+      }
+      
+      .user-input:focus {
+        outline: none;
+        box-shadow: 0 0 0 2px var(--primary-color);
+      }
+      
+      .button-row {
+        display: flex;
+        justify-content: flex-end;
+        padding: 8px;
+        background-color: var(--secondary-background-color);
       }
       
       .processing {
-        padding: 16px;
+        padding: 24px;
         display: flex;
         justify-content: center;
+        align-items: center;
         font-style: italic;
+        color: var(--secondary-text-color);
+        background-color: var(--secondary-background-color);
+        border-radius: 8px;
+        margin-bottom: 16px;
+      }
+      
+      .create-button-container {
+        display: flex;
+        justify-content: center;
+        margin-top: 16px;
       }
       
       .create-button {
-        margin-top: 16px;
-        align-self: center;
+        --mdc-theme-primary: var(--success-color, #4CAF50);
       }
       
       .result {
@@ -274,7 +362,7 @@ class AiAutomationCreator extends LitElement {
         display: flex;
         align-items: center;
         margin-bottom: 24px;
-        color: var(--success-color);
+        color: var(--success-color, #4CAF50);
         font-size: 18px;
       }
       
@@ -285,9 +373,9 @@ class AiAutomationCreator extends LitElement {
       
       .yaml-preview {
         width: 100%;
-        background-color: var(--code-background-color, #f0f0f0);
+        background-color: var(--code-background-color, #f5f5f5);
         padding: 16px;
-        border-radius: 4px;
+        border-radius: 8px;
         margin-bottom: 24px;
         overflow-x: auto;
       }
@@ -296,21 +384,37 @@ class AiAutomationCreator extends LitElement {
         margin: 0;
         white-space: pre-wrap;
         word-wrap: break-word;
+        font-family: monospace;
+        font-size: 14px;
       }
       
       .buttons {
         display: flex;
         gap: 8px;
       }
+      
+      @media (max-width: 600px) {
+        .message {
+          max-width: 95%;
+        }
+      }
     `;
   }
 
   connectedCallback() {
     super.connectedCallback();
+    
     // Start the conversation with the first question
-    this.conversation = [
-      { sender: "assistant", content: this.automationSteps[0].question },
-    ];
+    if (this.conversation.length === 0) {
+      this.conversation = [
+        { sender: "assistant", content: this.automationSteps[0].question },
+      ];
+    }
+  }
+  
+  // This is called when panel is first created
+  setConfig(config) {
+    // Nothing to configure
   }
 }
 

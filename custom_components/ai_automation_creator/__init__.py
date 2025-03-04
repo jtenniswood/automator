@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.components.persistent_notification import create as create_notification
 
 from .const import CONF_OPENAI_API_KEY, DOMAIN, CONF_MODEL, DEFAULT_MODEL
 from .panel import async_setup_panel
@@ -50,15 +51,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up the OpenAI client
     openai.api_key = entry.data[CONF_OPENAI_API_KEY]
     
-    # Register frontend resources
-    await async_register_frontend(hass)
+    _LOGGER.info("Setting up AI Automation Creator integration")
     
-    # Set up panel
-    await async_setup_panel(hass)
-    
-    # Store automation response for frontend
+    # Initialize data structure
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN]["latest_automation"] = None
+    hass.data[DOMAIN].update({
+        "latest_automation": None,
+        "api_key": entry.data[CONF_OPENAI_API_KEY],
+        "model": DEFAULT_MODEL,
+    })
+    
+    # Register frontend resources - this must come first
+    frontend_success = await async_register_frontend(hass)
+    if not frontend_success:
+        _LOGGER.error("Failed to register frontend components")
+        create_notification(
+            hass,
+            "Failed to register frontend components. The AI Automation Creator may not work properly.",
+            title="AI Automation Creator Error",
+            notification_id="ai_automation_creator_frontend_error",
+        )
+    
+    # Set up panel after frontend is registered
+    panel_success = await async_setup_panel(hass)
+    if not panel_success:
+        _LOGGER.error("Failed to register sidebar panel")
+        create_notification(
+            hass,
+            "Failed to register sidebar panel. You may not see the AI Automation Creator in the sidebar.",
+            title="AI Automation Creator Error",
+            notification_id="ai_automation_creator_panel_error",
+        )
     
     async def create_automation(call: ServiceCall) -> None:
         """Create an automation based on natural language description."""
@@ -114,16 +137,40 @@ Please provide the automation configuration in YAML format. The YAML should be v
             
             # Save the automation to a file
             automation_path = f"{hass.config.config_dir}/automations.yaml"
-            with open(automation_path, "a") as f:
-                f.write(f"\n{automation_yaml}\n")
-
-            # Reload automations
-            await hass.services.async_call("automation", "reload")
+            try:
+                with open(automation_path, "a") as f:
+                    f.write(f"\n{automation_yaml}\n")
+                
+                # Reload automations
+                await hass.services.async_call("automation", "reload")
+                
+                # Create a notification
+                create_notification(
+                    hass,
+                    f"Successfully created automation from your description: \"{description[:50]}...\"",
+                    title="Automation Created",
+                    notification_id="ai_automation_creator_success",
+                )
+                
+            except Exception as file_err:
+                _LOGGER.error("Error saving automation: %s", file_err)
+                create_notification(
+                    hass,
+                    f"Generated automation but failed to save it: {str(file_err)}",
+                    title="Automation Error",
+                    notification_id="ai_automation_creator_file_error",
+                )
             
             return {"success": True, "automation": automation_yaml}
 
         except Exception as err:
             _LOGGER.error("Error creating automation: %s", err)
+            create_notification(
+                hass,
+                f"Failed to create automation: {str(err)}",
+                title="Automation Error",
+                notification_id="ai_automation_creator_error",
+            )
             raise
 
     hass.services.async_register(
@@ -133,6 +180,7 @@ Please provide the automation configuration in YAML format. The YAML should be v
         schema=SERVICE_CREATE_AUTOMATION_SCHEMA
     )
     
+    _LOGGER.info("AI Automation Creator is ready")
     return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
