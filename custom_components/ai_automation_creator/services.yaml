@@ -1,0 +1,12 @@
+create_automation:
+  name: Create Automation
+  description: Create a Home Assistant automation using natural language descriptions.
+  fields:
+    description:
+      name: Description
+      description: Natural language description of the automation you want to create.
+      required: true
+      example: "Turn on the living room lights when motion is detected in the hallway, but only if it's after sunset."
+      selector:
+        text:
+          multiline: true 

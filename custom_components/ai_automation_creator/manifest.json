@@ -1,0 +1,13 @@
+{
+  "domain": "ai_automation_creator",
+  "name": "AI Automation Creator",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["http"],
+  "documentation": "https://github.com/yourusername/ai-automation-creator",
+  "homekit": {},
+  "integration_type": "service",
+  "iot_standards": [],
+  "requirements": ["openai>=1.0.0"],
+  "version": "0.1.0"
+} 
