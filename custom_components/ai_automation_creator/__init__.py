@@ -10,7 +10,7 @@ import re
 import datetime
 import time
 
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, State
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers import config_validation as cv
@@ -108,7 +108,9 @@ async def setup_services(hass: HomeAssistant):
             4. Use proper yaml formatting with correct indentation.
             5. Include an 'alias' that is VERY BRIEF and SUCCINCT (5 words or less).
             6. Include a descriptive 'description' field explaining what the automation does.
-            7. Ensure all triggers have unique IDs.
+            7. Ensure all triggers have unique IDs that match their purpose or title.
+            8. IMPORTANT: ONLY use entities that ACTUALLY EXIST in the system.
+            9. If a trigger has an alias, use that alias (converted to snake_case) as its ID.
             
             Example format (do not include the id):
             ```
@@ -118,6 +120,7 @@ async def setup_services(hass: HomeAssistant):
               - platform: sun
                 event: sunset
                 id: sunset_trigger
+                alias: Sunset Trigger
             condition: []
             action:
               - service: light.turn_on
@@ -128,13 +131,49 @@ async def setup_services(hass: HomeAssistant):
             """
             
             try:
-                # Make the OpenAI API call in the simplest way possible
+                # Get a list of existing entities in the system for validation
+                existing_entities = []
+                entity_info = []
+                
+                for entity_id, state in hass.states.async_all():
+                    existing_entities.append(entity_id)
+                    
+                    # Get entity friendly name and add to entity info
+                    friendly_name = state.attributes.get("friendly_name", entity_id)
+                    entity_data = {
+                        "entity_id": entity_id,
+                        "name": friendly_name,
+                        "state": state.state
+                    }
+                    
+                    # Add domain-specific attributes that might be helpful
+                    if entity_id.startswith("light."):
+                        entity_data["type"] = "light"
+                    elif entity_id.startswith("switch."):
+                        entity_data["type"] = "switch"
+                    elif entity_id.startswith("sensor."):
+                        entity_data["type"] = "sensor"
+                        entity_data["unit"] = state.attributes.get("unit_of_measurement", "")
+                    
+                    entity_info.append(entity_data)
+                
+                _LOGGER.info(f"Found {len(existing_entities)} entities in Home Assistant")
+                
+                # Add entity information to the user prompt
+                user_prompt = f"""Create automation: {description}
+                
+                Available entities (use ONLY these entities in your automation):
+                {yaml.dump(entity_info[:50], default_flow_style=False)}
+                
+                {'' if len(entity_info) <= 50 else f'... and {len(entity_info) - 50} more entities'}
+                """
+                
                 def call_openai():
                     return openai.chat.completions.create(
                         model=DEFAULT_MODEL,
                         messages=[
                             {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": f"Create automation: {description}"}
+                            {"role": "user", "content": user_prompt}
                         ],
                         temperature=0.2,
                     )
@@ -408,14 +447,27 @@ async def enhance_automation(hass, automation_data):
     if "trigger" in automation_data:
         for i, trigger in enumerate(automation_data["trigger"]):
             if "id" not in trigger:
-                # Generate an ID based on the trigger type/platform
-                trigger_type = trigger.get("platform", "")
-                if not trigger_type and "type" in trigger:
-                    trigger_type = trigger["type"]
-                if not trigger_type:
-                    trigger_type = "trigger"
+                # Generate an ID based on the trigger alias or type/platform
+                trigger_alias = trigger.get("alias", "")
                 
-                trigger_id = f"{trigger_type}_{i+1}_trigger"
+                if trigger_alias:
+                    # Convert alias to snake_case for the ID
+                    import re
+                    trigger_id = re.sub(r'[^a-z0-9]', '_', trigger_alias.lower())
+                    trigger_id = re.sub(r'_+', '_', trigger_id)  # Replace multiple underscores with a single one
+                    trigger_id = trigger_id.strip('_')
+                    if not trigger_id:
+                        trigger_id = f"trigger_{i+1}"
+                else:
+                    # Fall back to using the trigger type/platform
+                    trigger_type = trigger.get("platform", "")
+                    if not trigger_type and "type" in trigger:
+                        trigger_type = trigger["type"]
+                    if not trigger_type:
+                        trigger_type = "trigger"
+                    
+                    trigger_id = f"{trigger_type}_{i+1}"
+                
                 trigger["id"] = trigger_id
                 _LOGGER.info(f"Added ID '{trigger_id}' to trigger")
     
@@ -437,13 +489,17 @@ async def enhance_automation(hass, automation_data):
     if invalid_entities:
         warning_msg = f"The following entities do not exist: {', '.join(invalid_entities)}"
         _LOGGER.warning(warning_msg)
+        
+        # Add warning to description
         automation_data["description"] = f"{automation_data.get('description', '')} WARNING: {warning_msg}"
+        
+        # Remove invalid entities or replace with placeholders
+        replace_invalid_entities(automation_data, invalid_entities)
     
     # Find primary entity for icon and area
     primary_entity = None
-    primary_device_id = None
     
-    # Prioritize entities in actions
+    # Prioritize entities in actions that actually exist
     if "action" in automation_data:
         primary_entity = find_primary_entity_in_actions(automation_data["action"], hass)
     
@@ -586,4 +642,30 @@ def find_primary_entity_in_dict(data):
                     if result:
                         return result
     
-    return None 
+    return None
+
+def replace_invalid_entities(data, invalid_entities):
+    """Replace invalid entities with placeholders or remove them from the automation."""
+    if not isinstance(data, dict):
+        return
+    
+    # Handle entity_id in this dictionary
+    if "entity_id" in data:
+        entity_id = data["entity_id"]
+        if isinstance(entity_id, str) and entity_id in invalid_entities:
+            # Replace with a placeholder or remove
+            _LOGGER.info(f"Removing invalid entity '{entity_id}' from automation")
+            del data["entity_id"]
+        elif isinstance(entity_id, list):
+            # Filter out invalid entities from the list
+            data["entity_id"] = [e for e in entity_id if e not in invalid_entities]
+    
+    # Recursively process nested dictionaries
+    for key, value in list(data.items()):  # Use list() to allow modifying during iteration
+        if isinstance(value, dict):
+            replace_invalid_entities(value, invalid_entities)
+        elif isinstance(value, list):
+            # For lists containing dictionaries, process each dictionary
+            for item in value:
+                if isinstance(item, dict):
+                    replace_invalid_entities(item, invalid_entities) 
