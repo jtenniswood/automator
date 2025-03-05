@@ -135,7 +135,8 @@ async def setup_services(hass: HomeAssistant):
                 existing_entities = []
                 entity_info = []
                 
-                for entity_id, state in hass.states.async_all():
+                for state in hass.states.async_all():
+                    entity_id = state.entity_id
                     existing_entities.append(entity_id)
                     
                     # Get entity friendly name and add to entity info
