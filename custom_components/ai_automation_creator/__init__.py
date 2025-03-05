@@ -200,16 +200,24 @@ async def setup_services(hass: HomeAssistant):
                 
                 automation_data["id"] = automation_id
                 
-                # Add the "automator" tag
+                # Store tags and icon separately - we'll apply them after creation
+                # through the entity registry, not directly in the automation configuration
+                automation_tags = ["automator"]
+                automation_icon = None
+                
+                # Remove tags from automation data if present (not directly supported)
                 if "tags" in automation_data:
-                    if "automator" not in automation_data["tags"]:
-                        automation_data["tags"].append("automator")
-                else:
-                    automation_data["tags"] = ["automator"]
+                    automation_data.pop("tags")
+                
+                # Remove icon from automation data if present (not directly supported)
+                if "icon" in automation_data:
+                    automation_icon = automation_data.pop("icon")
                 
                 # Validate and enhance the automation data
                 try:
-                    await enhance_automation(hass, automation_data)
+                    icon_from_entity, area_id = await enhance_automation(hass, automation_data)
+                    if icon_from_entity and not automation_icon:
+                        automation_icon = icon_from_entity
                 except Exception as enhance_error:
                     _LOGGER.error("Error enhancing automation: %s", str(enhance_error))
                 
@@ -229,10 +237,7 @@ async def setup_services(hass: HomeAssistant):
                     from homeassistant.components.automation import DOMAIN as AUTOMATION_DOMAIN
                     
                     # Create the automation using the automation.create service
-                    service_data = {
-                        "id": automation_id,
-                        **automation_data  # Include all the generated automation data
-                    }
+                    service_data = automation_data.copy()
                     
                     await hass.services.async_call(
                         AUTOMATION_DOMAIN,
@@ -242,6 +247,36 @@ async def setup_services(hass: HomeAssistant):
                     )
                     
                     _LOGGER.info("Automation created successfully via API")
+                    
+                    # Apply tags and icon through the entity registry
+                    try:
+                        from homeassistant.helpers import entity_registry as er
+                        entity_reg = er.async_get(hass)
+                        entity_id = f"automation.{automation_id}"
+                        
+                        # Wait a moment for the entity to be registered
+                        await asyncio.sleep(1)
+                        
+                        # Update entity with tags and icon
+                        if entity_reg.async_get(entity_id):
+                            # The entity registry entry exists, update it
+                            _LOGGER.info(f"Updating entity registry for {entity_id} with tags and icon")
+                            
+                            # Apply tags
+                            for tag in automation_tags:
+                                entity_reg.async_update_entity(entity_id, tags={tag})
+                            
+                            # Apply icon
+                            if automation_icon:
+                                entity_reg.async_update_entity(entity_id, icon=automation_icon)
+                            
+                            # Apply area if found
+                            if area_id:
+                                entity_reg.async_update_entity(entity_id, area_id=area_id)
+                            
+                            _LOGGER.info(f"Updated entity registry successfully for {entity_id}")
+                    except Exception as er_exception:
+                        _LOGGER.error(f"Error updating entity registry: {str(er_exception)}")
                     
                     # Also save to the automations.yaml file for persistence
                     # This is optional but ensures the automation persists across restarts
@@ -444,29 +479,32 @@ async def enhance_automation(hass, automation_data):
     """Enhance automation data with device information and validate entities."""
     _LOGGER.info("Enhancing automation data...")
     
+    icon_from_entity = None
+    area_id = None
+    
     # Ensure all triggers have IDs
     if "trigger" in automation_data:
         for i, trigger in enumerate(automation_data["trigger"]):
             if "id" not in trigger:
                 # Generate an ID based on the trigger alias or type/platform
-                trigger_id = None
+                trigger_alias = trigger.get("alias", "")
                 
-                # Use the trigger alias if available
-                if "alias" in trigger:
-                    trigger_id = re.sub(r'[^a-z0-9_]', '_', trigger["alias"].lower())
-                    trigger_id = re.sub(r'_+', '_', trigger_id).strip('_')
-                    if trigger_id:
-                        trigger_id = f"{trigger_id}_trigger"
-                
-                # Fall back to trigger type if no alias or invalid alias
-                if not trigger_id:
+                if trigger_alias:
+                    # Convert alias to snake_case for the ID
+                    trigger_id = re.sub(r'[^a-z0-9]', '_', trigger_alias.lower())
+                    trigger_id = re.sub(r'_+', '_', trigger_id)  # Replace multiple underscores with a single one
+                    trigger_id = trigger_id.strip('_')
+                    if not trigger_id:
+                        trigger_id = f"trigger_{i+1}"
+                else:
+                    # Fall back to using the trigger type/platform
                     trigger_type = trigger.get("platform", "")
                     if not trigger_type and "type" in trigger:
                         trigger_type = trigger["type"]
                     if not trigger_type:
                         trigger_type = "trigger"
                     
-                    trigger_id = f"{trigger_type}_{i+1}_trigger"
+                    trigger_id = f"{trigger_type}_{i+1}"
                 
                 trigger["id"] = trigger_id
                 _LOGGER.info(f"Added ID '{trigger_id}' to trigger")
@@ -489,33 +527,41 @@ async def enhance_automation(hass, automation_data):
     if invalid_entities:
         warning_msg = f"The following entities do not exist: {', '.join(invalid_entities)}"
         _LOGGER.warning(warning_msg)
+        
+        # Add warning to description
         automation_data["description"] = f"{automation_data.get('description', '')} WARNING: {warning_msg}"
+        
+        # Remove invalid entities or replace with placeholders
+        replace_invalid_entities(automation_data, invalid_entities)
     
     # Find primary entity for icon and area
     primary_entity = None
     
-    # Prioritize entities in actions that actually exist in HA
+    # Extract all entities from actions
+    action_entities = []
     if "action" in automation_data:
-        for candidate in find_entities_in_actions(automation_data["action"]):
-            if hass.states.get(candidate) is not None:
-                primary_entity = candidate
-                break
+        action_entities = find_primary_entity_in_actions(automation_data["action"], hass)
     
-    # If no valid entity found in actions, try triggers
-    if not primary_entity and "trigger" in automation_data:
-        for candidate in find_entities_in_triggers(automation_data["trigger"]):
-            if hass.states.get(candidate) is not None:
-                primary_entity = candidate
-                break
+    # Extract entities from triggers
+    trigger_entities = []
+    if "trigger" in automation_data:
+        trigger_entities = find_primary_entity_in_triggers(automation_data["trigger"], hass)
+    
+    # Combine entities and find first valid one
+    all_entities = action_entities + trigger_entities
+    for entity_id in all_entities:
+        if hass.states.get(entity_id):
+            primary_entity = entity_id
+            break
     
     # If we found a primary entity, get its icon and area
     if primary_entity:
         state = hass.states.get(primary_entity)
         if state and hasattr(state, 'attributes'):
             # Get icon from entity
-            if "icon" in state.attributes and "icon" not in automation_data:
-                automation_data["icon"] = state.attributes["icon"]
-                _LOGGER.info(f"Using icon '{state.attributes['icon']}' from entity '{primary_entity}'")
+            if "icon" in state.attributes:
+                icon_from_entity = state.attributes["icon"]
+                _LOGGER.info(f"Using icon '{icon_from_entity}' from entity '{primary_entity}'")
             
             try:
                 # Get area from entity
@@ -535,11 +581,13 @@ async def enhance_automation(hass, automation_data):
                         area_entry = area_reg.async_get_area(device_entry.area_id)
                         
                         if area_entry:
-                            # Store the area ID
-                            automation_data["area_id"] = device_entry.area_id
-                            _LOGGER.info(f"Using area ID '{device_entry.area_id}' from entity '{primary_entity}'")
+                            # Store the area ID to use with entity registry later
+                            area_id = device_entry.area_id
+                            _LOGGER.info(f"Using area '{area_entry.name}' from entity '{primary_entity}'")
             except Exception as area_error:
                 _LOGGER.error(f"Error getting area for entity {primary_entity}: {str(area_error)}")
+    
+    return icon_from_entity, area_id
 
 def extract_entities_from_dict(data, entity_set, device_set):
     """Recursively extract entity_ids and device_ids from a dictionary."""
