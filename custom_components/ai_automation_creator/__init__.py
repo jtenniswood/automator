@@ -106,16 +106,18 @@ async def setup_services(hass: HomeAssistant):
             2. Do NOT include an 'id' field - I will add this automatically.
             3. Include appropriate triggers, conditions, and actions based on the request.
             4. Use proper yaml formatting with correct indentation.
-            5. Include an 'alias' that is human-readable.
+            5. Include an 'alias' that is VERY BRIEF and SUCCINCT (5 words or less).
             6. Include a descriptive 'description' field explaining what the automation does.
+            7. Ensure all triggers have unique IDs.
             
             Example format (do not include the id):
             ```
-            alias: Turn on lights at sunset
+            alias: Lights On at Sunset
             description: Turns on the living room lights automatically when the sun sets
             trigger:
               - platform: sun
                 event: sunset
+                id: sunset_trigger
             condition: []
             action:
               - service: light.turn_on
@@ -157,6 +159,19 @@ async def setup_services(hass: HomeAssistant):
                     _LOGGER.info("Automation already had an ID, replacing with: %s", automation_id)
                 
                 automation_data["id"] = automation_id
+                
+                # Add the "automator" tag
+                if "tags" in automation_data:
+                    if "automator" not in automation_data["tags"]:
+                        automation_data["tags"].append("automator")
+                else:
+                    automation_data["tags"] = ["automator"]
+                
+                # Validate and enhance the automation data
+                try:
+                    await enhance_automation(hass, automation_data)
+                except Exception as enhance_error:
+                    _LOGGER.error("Error enhancing automation: %s", str(enhance_error))
                 
                 # Regenerate the YAML for a single automation
                 single_automation_yaml = yaml.dump(automation_data, default_flow_style=False)
@@ -384,3 +399,191 @@ Successfully created automation from: {description}
     
     _LOGGER.info("AI Automation Creator services registered")
     return True 
+
+async def enhance_automation(hass, automation_data):
+    """Enhance automation data with device information and validate entities."""
+    _LOGGER.info("Enhancing automation data...")
+    
+    # Ensure all triggers have IDs
+    if "trigger" in automation_data:
+        for i, trigger in enumerate(automation_data["trigger"]):
+            if "id" not in trigger:
+                # Generate an ID based on the trigger type/platform
+                trigger_type = trigger.get("platform", "")
+                if not trigger_type and "type" in trigger:
+                    trigger_type = trigger["type"]
+                if not trigger_type:
+                    trigger_type = "trigger"
+                
+                trigger_id = f"{trigger_type}_{i+1}_trigger"
+                trigger["id"] = trigger_id
+                _LOGGER.info(f"Added ID '{trigger_id}' to trigger")
+    
+    # Find target devices and entities to get icon and area information
+    target_entities = set()
+    target_devices = set()
+    
+    # Extract entities from the automation
+    extract_entities_from_dict(automation_data, target_entities, target_devices)
+    
+    # Validate entities exist in Home Assistant
+    invalid_entities = []
+    for entity_id in target_entities:
+        state = hass.states.get(entity_id)
+        if state is None:
+            _LOGGER.warning(f"Entity '{entity_id}' does not exist in Home Assistant")
+            invalid_entities.append(entity_id)
+    
+    if invalid_entities:
+        warning_msg = f"The following entities do not exist: {', '.join(invalid_entities)}"
+        _LOGGER.warning(warning_msg)
+        automation_data["description"] = f"{automation_data.get('description', '')} WARNING: {warning_msg}"
+    
+    # Find primary entity for icon and area
+    primary_entity = None
+    primary_device_id = None
+    
+    # Prioritize entities in actions
+    if "action" in automation_data:
+        primary_entity = find_primary_entity_in_actions(automation_data["action"], hass)
+    
+    # If no entity found in actions, try triggers
+    if not primary_entity and "trigger" in automation_data:
+        primary_entity = find_primary_entity_in_triggers(automation_data["trigger"], hass)
+    
+    # If we found a primary entity, get its icon and area
+    if primary_entity:
+        state = hass.states.get(primary_entity)
+        if state and state.attributes:
+            # Get icon from entity
+            if "icon" in state.attributes and "icon" not in automation_data:
+                automation_data["icon"] = state.attributes["icon"]
+                _LOGGER.info(f"Using icon '{state.attributes['icon']}' from entity '{primary_entity}'")
+            
+            # Get area from entity
+            from homeassistant.helpers import area_registry as ar
+            from homeassistant.helpers import device_registry as dr
+            from homeassistant.helpers import entity_registry as er
+            
+            entity_reg = er.async_get(hass)
+            entity_entry = entity_reg.async_get(primary_entity)
+            
+            if entity_entry and entity_entry.device_id:
+                device_reg = dr.async_get(hass)
+                device_entry = device_reg.async_get(entity_entry.device_id)
+                
+                if device_entry and device_entry.area_id:
+                    area_reg = ar.async_get(hass)
+                    area_entry = area_reg.async_get_area(device_entry.area_id)
+                    
+                    if area_entry:
+                        # Store the area name in a custom attribute that Home Assistant will use
+                        if "device" not in automation_data:
+                            automation_data["device"] = {}
+                        automation_data["device"]["area_id"] = device_entry.area_id
+                        _LOGGER.info(f"Using area '{area_entry.name}' from entity '{primary_entity}'")
+
+def extract_entities_from_dict(data, entity_set, device_set):
+    """Recursively extract entity_ids and device_ids from a dictionary."""
+    if not isinstance(data, dict):
+        return
+    
+    # Check for entity_id
+    if "entity_id" in data:
+        entity_id = data["entity_id"]
+        if isinstance(entity_id, str):
+            entity_set.add(entity_id)
+        elif isinstance(entity_id, list):
+            for eid in entity_id:
+                if isinstance(eid, str):
+                    entity_set.add(eid)
+    
+    # Check for device_id
+    if "device_id" in data:
+        device_id = data["device_id"]
+        if isinstance(device_id, str):
+            device_set.add(device_id)
+    
+    # Recurse through all dictionary values
+    for key, value in data.items():
+        if isinstance(value, dict):
+            extract_entities_from_dict(value, entity_set, device_set)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    extract_entities_from_dict(item, entity_set, device_set)
+
+def find_primary_entity_in_actions(actions, hass):
+    """Find the primary entity in the automation actions."""
+    for action in actions:
+        if isinstance(action, dict):
+            # Direct entity in the action
+            if "entity_id" in action:
+                entity_id = action["entity_id"]
+                if isinstance(entity_id, str):
+                    return entity_id
+                elif isinstance(entity_id, list) and len(entity_id) > 0:
+                    return entity_id[0]
+            
+            # Entity in target
+            if "target" in action and isinstance(action["target"], dict) and "entity_id" in action["target"]:
+                entity_id = action["target"]["entity_id"]
+                if isinstance(entity_id, str):
+                    return entity_id
+                elif isinstance(entity_id, list) and len(entity_id) > 0:
+                    return entity_id[0]
+            
+            # Recursively check nested dictionaries
+            for key, value in action.items():
+                if isinstance(value, dict):
+                    extracted = find_primary_entity_in_dict(value)
+                    if extracted:
+                        return extracted
+                elif isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, dict):
+                            extracted = find_primary_entity_in_dict(item)
+                            if extracted:
+                                return extracted
+    
+    return None
+
+def find_primary_entity_in_triggers(triggers, hass):
+    """Find the primary entity in the automation triggers."""
+    for trigger in triggers:
+        if isinstance(trigger, dict) and "entity_id" in trigger:
+            entity_id = trigger["entity_id"]
+            if isinstance(entity_id, str):
+                return entity_id
+            elif isinstance(entity_id, list) and len(entity_id) > 0:
+                return entity_id[0]
+    
+    return None
+
+def find_primary_entity_in_dict(data):
+    """Find the first entity_id in a dictionary."""
+    if not isinstance(data, dict):
+        return None
+    
+    # Check for entity_id
+    if "entity_id" in data:
+        entity_id = data["entity_id"]
+        if isinstance(entity_id, str):
+            return entity_id
+        elif isinstance(entity_id, list) and len(entity_id) > 0:
+            return entity_id[0]
+    
+    # Recurse through all dictionary values
+    for key, value in data.items():
+        if isinstance(value, dict):
+            result = find_primary_entity_in_dict(value)
+            if result:
+                return result
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    result = find_primary_entity_in_dict(item)
+                    if result:
+                        return result
+    
+    return None 
