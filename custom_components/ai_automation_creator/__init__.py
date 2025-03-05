@@ -448,25 +448,24 @@ async def enhance_automation(hass, automation_data):
         for i, trigger in enumerate(automation_data["trigger"]):
             if "id" not in trigger:
                 # Generate an ID based on the trigger alias or type/platform
-                trigger_alias = trigger.get("alias", "")
+                trigger_id = None
                 
-                if trigger_alias:
-                    # Convert alias to snake_case for the ID
-                    import re
-                    trigger_id = re.sub(r'[^a-z0-9]', '_', trigger_alias.lower())
-                    trigger_id = re.sub(r'_+', '_', trigger_id)  # Replace multiple underscores with a single one
-                    trigger_id = trigger_id.strip('_')
-                    if not trigger_id:
-                        trigger_id = f"trigger_{i+1}"
-                else:
-                    # Fall back to using the trigger type/platform
+                # Use the trigger alias if available
+                if "alias" in trigger:
+                    trigger_id = re.sub(r'[^a-z0-9_]', '_', trigger["alias"].lower())
+                    trigger_id = re.sub(r'_+', '_', trigger_id).strip('_')
+                    if trigger_id:
+                        trigger_id = f"{trigger_id}_trigger"
+                
+                # Fall back to trigger type if no alias or invalid alias
+                if not trigger_id:
                     trigger_type = trigger.get("platform", "")
                     if not trigger_type and "type" in trigger:
                         trigger_type = trigger["type"]
                     if not trigger_type:
                         trigger_type = "trigger"
                     
-                    trigger_id = f"{trigger_type}_{i+1}"
+                    trigger_id = f"{trigger_type}_{i+1}_trigger"
                 
                 trigger["id"] = trigger_id
                 _LOGGER.info(f"Added ID '{trigger_id}' to trigger")
@@ -489,55 +488,57 @@ async def enhance_automation(hass, automation_data):
     if invalid_entities:
         warning_msg = f"The following entities do not exist: {', '.join(invalid_entities)}"
         _LOGGER.warning(warning_msg)
-        
-        # Add warning to description
         automation_data["description"] = f"{automation_data.get('description', '')} WARNING: {warning_msg}"
-        
-        # Remove invalid entities or replace with placeholders
-        replace_invalid_entities(automation_data, invalid_entities)
     
     # Find primary entity for icon and area
     primary_entity = None
     
-    # Prioritize entities in actions that actually exist
+    # Prioritize entities in actions that actually exist in HA
     if "action" in automation_data:
-        primary_entity = find_primary_entity_in_actions(automation_data["action"], hass)
+        for candidate in find_entities_in_actions(automation_data["action"]):
+            if hass.states.get(candidate) is not None:
+                primary_entity = candidate
+                break
     
-    # If no entity found in actions, try triggers
+    # If no valid entity found in actions, try triggers
     if not primary_entity and "trigger" in automation_data:
-        primary_entity = find_primary_entity_in_triggers(automation_data["trigger"], hass)
+        for candidate in find_entities_in_triggers(automation_data["trigger"]):
+            if hass.states.get(candidate) is not None:
+                primary_entity = candidate
+                break
     
     # If we found a primary entity, get its icon and area
     if primary_entity:
         state = hass.states.get(primary_entity)
-        if state and state.attributes:
+        if state and hasattr(state, 'attributes'):
             # Get icon from entity
             if "icon" in state.attributes and "icon" not in automation_data:
                 automation_data["icon"] = state.attributes["icon"]
                 _LOGGER.info(f"Using icon '{state.attributes['icon']}' from entity '{primary_entity}'")
             
-            # Get area from entity
-            from homeassistant.helpers import area_registry as ar
-            from homeassistant.helpers import device_registry as dr
-            from homeassistant.helpers import entity_registry as er
-            
-            entity_reg = er.async_get(hass)
-            entity_entry = entity_reg.async_get(primary_entity)
-            
-            if entity_entry and entity_entry.device_id:
-                device_reg = dr.async_get(hass)
-                device_entry = device_reg.async_get(entity_entry.device_id)
+            try:
+                # Get area from entity
+                from homeassistant.helpers import area_registry as ar
+                from homeassistant.helpers import device_registry as dr
+                from homeassistant.helpers import entity_registry as er
                 
-                if device_entry and device_entry.area_id:
-                    area_reg = ar.async_get(hass)
-                    area_entry = area_reg.async_get_area(device_entry.area_id)
+                entity_reg = er.async_get(hass)
+                entity_entry = entity_reg.async_get(primary_entity)
+                
+                if entity_entry and entity_entry.device_id:
+                    device_reg = dr.async_get(hass)
+                    device_entry = device_reg.async_get(entity_entry.device_id)
                     
-                    if area_entry:
-                        # Store the area name in a custom attribute that Home Assistant will use
-                        if "device" not in automation_data:
-                            automation_data["device"] = {}
-                        automation_data["device"]["area_id"] = device_entry.area_id
-                        _LOGGER.info(f"Using area '{area_entry.name}' from entity '{primary_entity}'")
+                    if device_entry and device_entry.area_id:
+                        area_reg = ar.async_get(hass)
+                        area_entry = area_reg.async_get_area(device_entry.area_id)
+                        
+                        if area_entry:
+                            # Store the area ID
+                            automation_data["area_id"] = device_entry.area_id
+                            _LOGGER.info(f"Using area ID '{device_entry.area_id}' from entity '{primary_entity}'")
+            except Exception as area_error:
+                _LOGGER.error(f"Error getting area for entity {primary_entity}: {str(area_error)}")
 
 def extract_entities_from_dict(data, entity_set, device_set):
     """Recursively extract entity_ids and device_ids from a dictionary."""
@@ -569,103 +570,74 @@ def extract_entities_from_dict(data, entity_set, device_set):
                 if isinstance(item, dict):
                     extract_entities_from_dict(item, entity_set, device_set)
 
-def find_primary_entity_in_actions(actions, hass):
-    """Find the primary entity in the automation actions."""
+def find_entities_in_actions(actions):
+    """Find all entities in the automation actions and return as a list."""
+    entities = []
+    
     for action in actions:
         if isinstance(action, dict):
             # Direct entity in the action
             if "entity_id" in action:
                 entity_id = action["entity_id"]
                 if isinstance(entity_id, str):
-                    return entity_id
-                elif isinstance(entity_id, list) and len(entity_id) > 0:
-                    return entity_id[0]
+                    entities.append(entity_id)
+                elif isinstance(entity_id, list):
+                    entities.extend([e for e in entity_id if isinstance(e, str)])
             
             # Entity in target
             if "target" in action and isinstance(action["target"], dict) and "entity_id" in action["target"]:
                 entity_id = action["target"]["entity_id"]
                 if isinstance(entity_id, str):
-                    return entity_id
-                elif isinstance(entity_id, list) and len(entity_id) > 0:
-                    return entity_id[0]
+                    entities.append(entity_id)
+                elif isinstance(entity_id, list):
+                    entities.extend([e for e in entity_id if isinstance(e, str)])
             
             # Recursively check nested dictionaries
             for key, value in action.items():
                 if isinstance(value, dict):
-                    extracted = find_primary_entity_in_dict(value)
-                    if extracted:
-                        return extracted
+                    entities.extend(find_entities_in_dict(value))
                 elif isinstance(value, list):
                     for item in value:
                         if isinstance(item, dict):
-                            extracted = find_primary_entity_in_dict(item)
-                            if extracted:
-                                return extracted
+                            entities.extend(find_entities_in_dict(item))
     
-    return None
+    return entities
 
-def find_primary_entity_in_triggers(triggers, hass):
-    """Find the primary entity in the automation triggers."""
+def find_entities_in_triggers(triggers):
+    """Find all entities in the automation triggers and return as a list."""
+    entities = []
+    
     for trigger in triggers:
         if isinstance(trigger, dict) and "entity_id" in trigger:
             entity_id = trigger["entity_id"]
             if isinstance(entity_id, str):
-                return entity_id
-            elif isinstance(entity_id, list) and len(entity_id) > 0:
-                return entity_id[0]
+                entities.append(entity_id)
+            elif isinstance(entity_id, list):
+                entities.extend([e for e in entity_id if isinstance(e, str)])
     
-    return None
+    return entities
 
-def find_primary_entity_in_dict(data):
-    """Find the first entity_id in a dictionary."""
+def find_entities_in_dict(data):
+    """Find all entity_ids in a dictionary and return as a list."""
+    entities = []
     if not isinstance(data, dict):
-        return None
+        return entities
     
     # Check for entity_id
     if "entity_id" in data:
         entity_id = data["entity_id"]
         if isinstance(entity_id, str):
-            return entity_id
-        elif isinstance(entity_id, list) and len(entity_id) > 0:
-            return entity_id[0]
+            entities.append(entity_id)
+        elif isinstance(entity_id, list):
+            entities.extend([e for e in entity_id if isinstance(e, str)])
     
     # Recurse through all dictionary values
     for key, value in data.items():
         if isinstance(value, dict):
-            result = find_primary_entity_in_dict(value)
-            if result:
-                return result
+            entities.extend(find_entities_in_dict(value))
         elif isinstance(value, list):
             for item in value:
                 if isinstance(item, dict):
-                    result = find_primary_entity_in_dict(item)
-                    if result:
-                        return result
+                    entities.extend(find_entities_in_dict(item))
     
-    return None
-
-def replace_invalid_entities(data, invalid_entities):
-    """Replace invalid entities with placeholders or remove them from the automation."""
-    if not isinstance(data, dict):
-        return
-    
-    # Handle entity_id in this dictionary
-    if "entity_id" in data:
-        entity_id = data["entity_id"]
-        if isinstance(entity_id, str) and entity_id in invalid_entities:
-            # Replace with a placeholder or remove
-            _LOGGER.info(f"Removing invalid entity '{entity_id}' from automation")
-            del data["entity_id"]
-        elif isinstance(entity_id, list):
-            # Filter out invalid entities from the list
-            data["entity_id"] = [e for e in entity_id if e not in invalid_entities]
-    
-    # Recursively process nested dictionaries
-    for key, value in list(data.items()):  # Use list() to allow modifying during iteration
-        if isinstance(value, dict):
-            replace_invalid_entities(value, invalid_entities)
-        elif isinstance(value, list):
-            # For lists containing dictionaries, process each dictionary
-            for item in value:
-                if isinstance(item, dict):
-                    replace_invalid_entities(item, invalid_entities) 
+    return entities 
